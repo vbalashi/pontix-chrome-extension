@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Translator Sidebar</title>
+    <link rel="stylesheet" href="sidebar.css">
+</head>
+<body>
+    <div class="sidebar-container">
+        <div class="selected-word-container">
+            <div class="selected-word" id="word">Select text to translate</div>
+            <div class="context-sentence" id="sentence"></div>
+        </div>
+
+        <div id="translations-container">
+            <!-- Default translation box (Google) -->
+            <div class="translation-box" data-provider="google">
+                <div class="translation-header">
+                    <div class="provider-info">
+                        <span class="provider-name">Google</span>
+                        <span class="target-language">Russian</span>
+                    </div>
+                    <div class="translation-controls">
+                        <button class="settings-button" title="Translation settings">
+                            <svg width="16" height="16" viewBox="0 0 24 24">
+                                <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+                            </svg>
+                        </button>
+                        <button class="delete-button" title="Remove translation">
+                            <svg width="16" height="16" viewBox="0 0 24 24">
+                                <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="translation-content" id="translation">
+                    <div class="translation-loading-indicator hidden">Переводим...</div>
+                    <div class="translation-text"></div>
+                    <div class="translation-error hidden">Ошибка перевода. Пожалуйста, попробуйте еще раз.</div>
+                </div>
+                <div class="provider-settings hidden">
+                    <div class="provider-selector">
+                        <label for="provider-select">Translation service:</label>
+                        <select class="provider-select">
+                            <option value="google">Google Translate</option>
+                            <option value="deepl">DeepL</option>
+                            <option value="microsoft">Microsoft Translator</option>
+                            <option value="yandex">Yandex Translate</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="claude">Claude</option>
+                        </select>
+                    </div>
+                    <div class="language-selector">
+                        <label for="language-select">Target language:</label>
+                        <select class="language-select">
+                            <option value="ru">Russian</option>
+                            <option value="en">English</option>
+                            <option value="de">German</option>
+                            <option value="fr">French</option>
+                            <option value="es">Spanish</option>
+                            <option value="zh">Chinese</option>
+                            <option value="ja">Japanese</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="add-translation-container">
+            <button id="add-translation-button">+ Add another translation</button>
+        </div>
+    </div>
+
+    <div id="global-settings-panel" class="hidden">
+        <div class="settings-header">
+            <h2>Translation Settings</h2>
+            <button id="close-settings">×</button>
+        </div>
+        <div class="settings-content">
+            <div class="provider-settings-section">
+                <h3>Translation Services</h3>
+                <div class="provider-setting" data-provider="google">
+                    <div class="provider-enable">
+                        <input type="checkbox" id="enable-google" checked>
+                        <label for="enable-google">Google Translate</label>
+                    </div>
+                    <div class="api-key-field hidden">
+                        <label for="google-api-key">API Key:</label>
+                        <input type="password" id="google-api-key" placeholder="Enter API key">
+                    </div>
+                </div>
+                <div class="provider-setting" data-provider="deepl">
+                    <div class="provider-enable">
+                        <input type="checkbox" id="enable-deepl">
+                        <label for="enable-deepl">DeepL</label>
+                    </div>
+                    <div class="api-key-field">
+                        <label for="deepl-api-key">API Key:</label>
+                        <input type="password" id="deepl-api-key" placeholder="Enter API key">
+                    </div>
+                </div>
+                <div class="provider-setting" data-provider="microsoft">
+                    <div class="provider-enable">
+                        <input type="checkbox" id="enable-microsoft">
+                        <label for="enable-microsoft">Microsoft Translator</label>
+                    </div>
+                    <div class="api-key-field">
+                        <label for="microsoft-api-key">API Key:</label>
+                        <input type="password" id="microsoft-api-key" placeholder="Enter API key">
+                    </div>
+                </div>
+                <div class="provider-setting" data-provider="yandex">
+                    <div class="provider-enable">
+                        <input type="checkbox" id="enable-yandex">
+                        <label for="enable-yandex">Yandex Translate</label>
+                    </div>
+                    <div class="api-key-field">
+                        <label for="yandex-api-key">API Key:</label>
+                        <input type="password" id="yandex-api-key" placeholder="Enter API key">
+                    </div>
+                </div>
+                <div class="provider-setting" data-provider="openai">
+                    <div class="provider-enable">
+                        <input type="checkbox" id="enable-openai">
+                        <label for="enable-openai">OpenAI</label>
+                    </div>
+                    <div class="api-key-field">
+                        <label for="openai-api-key">API Key:</label>
+                        <input type="password" id="openai-api-key" placeholder="Enter API key">
+                    </div>
+                </div>
+                <div class="provider-setting" data-provider="claude">
+                    <div class="provider-enable">
+                        <input type="checkbox" id="enable-claude">
+                        <label for="enable-claude">Claude</label>
+                    </div>
+                    <div class="api-key-field">
+                        <label for="claude-api-key">API Key:</label>
+                        <input type="password" id="claude-api-key" placeholder="Enter API key">
+                    </div>
+                </div>
+            </div>
+            <div class="settings-actions">
+                <button id="save-settings">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="global-settings-button" title="Global Settings">
+        <svg width="20" height="20" viewBox="0 0 24 24">
+            <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+        </svg>
+    </div>
+
+    <script src="sidebar.js"></script>
+</body>
+</html>
