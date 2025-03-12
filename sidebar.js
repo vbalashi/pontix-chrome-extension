@@ -107,7 +107,7 @@ function updateSettingsUI() {
         }
     }
     
-    // Hide Google API key field (as it's not needed for free tier)
+    // Hide Google API key field (as it's not needed)
     const googleApiField = document.querySelector('[data-provider="google"] .api-key-field');
     if (googleApiField) {
         googleApiField.classList.add('hidden');
@@ -285,7 +285,42 @@ function addTranslationBox(provider, targetLang) {
     boxDiv.setAttribute('data-provider', provider);
     boxDiv.id = boxId;
     
-    // Build the HTML for the new box
+    // When generating provider settings, exclude API key field for Google
+    const providerSettingsHTML = provider === 'google' ?
+        `<div class="provider-settings hidden">
+            <div class="provider-selector">
+                <label for="provider-select-${boxId}">Translation service:</label>
+                <select class="provider-select" id="provider-select-${boxId}">
+                    ${generateProviderOptions(provider)}
+                </select>
+            </div>
+            <div class="language-selector">
+                <label for="language-select-${boxId}">Target language:</label>
+                <select class="language-select" id="language-select-${boxId}">
+                    ${generateLanguageOptions(provider, targetLang)}
+                </select>
+            </div>
+        </div>` :
+        `<div class="provider-settings hidden">
+            <div class="provider-selector">
+                <label for="provider-select-${boxId}">Translation service:</label>
+                <select class="provider-select" id="provider-select-${boxId}">
+                    ${generateProviderOptions(provider)}
+                </select>
+            </div>
+            <div class="language-selector">
+                <label for="language-select-${boxId}">Target language:</label>
+                <select class="language-select" id="language-select-${boxId}">
+                    ${generateLanguageOptions(provider, targetLang)}
+                </select>
+            </div>
+            ${provider !== 'google' ? 
+            `<div class="api-key-reminder">
+                <small>API key required in global settings</small>
+            </div>` : ''}
+        </div>`;
+    
+    // Use the proper HTML with conditional API key reminders
     boxDiv.innerHTML = `
         <div class="translation-header">
             <div class="provider-info">
@@ -310,20 +345,7 @@ function addTranslationBox(provider, targetLang) {
             <div class="translation-text"></div>
             <div class="translation-error hidden">Ошибка перевода. Пожалуйста, попробуйте еще раз.</div>
         </div>
-        <div class="provider-settings hidden">
-            <div class="provider-selector">
-                <label for="provider-select-${boxId}">Translation service:</label>
-                <select class="provider-select" id="provider-select-${boxId}">
-                    ${generateProviderOptions(provider)}
-                </select>
-            </div>
-            <div class="language-selector">
-                <label for="language-select-${boxId}">Target language:</label>
-                <select class="language-select" id="language-select-${boxId}">
-                    ${generateLanguageOptions(provider, targetLang)}
-                </select>
-            </div>
-        </div>
+        ${providerSettingsHTML}
     `;
     
     // Add box to container
@@ -478,54 +500,41 @@ function translateText(boxElement, provider, targetLang) {
 
 // Translation implementation for Google Translate
 function translateWithGoogle(word, sentence, targetLang, boxElement) {
-    // In a real implementation, you would call the Google Translate API
-    // For now, we'll use a simple mock implementation
+    const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
+    const translationText = boxElement.querySelector('.translation-text');
+    const errorElement = boxElement.querySelector('.translation-error');
     
-    setTimeout(() => {
-        const translations = {
-            "ru": {
-                "triple": "тройной",
-                "stores": "хранилища",
-                "graph": "граф",
-                "database": "база данных",
-                "types": "типы",
-                "other": "другие",
-                "forms": "формы",
-                "NoSQL": "NoSQL",
-                "though": "хотя",
-                "there": "там",
-                "are": "есть",
-                "some": "некоторые",
-                "relational": "реляционные",
-                "implementations": "реализации"
-            },
-            "en": {
-                "тройной": "triple",
-                "хранилища": "stores",
-                "граф": "graph",
-                "база данных": "database"
+    // Show loading indicator
+    loadingIndicator.classList.remove('hidden');
+    errorElement.classList.add('hidden');
+    
+    // Use the free Google Translate API endpoint (no API key required)
+    const sourceLang = 'auto'; // Auto-detect source language
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodeURIComponent(word)}`;
+    
+    fetch(url)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
             }
-        };
-        
-        const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
-        const translationText = boxElement.querySelector('.translation-text');
-        const errorElement = boxElement.querySelector('.translation-error');
-        
-        // Hide loading
-        loadingIndicator.classList.add('hidden');
-        
-        // Try to get translation, otherwise generate a placeholder
-        let translation = "";
-        
-        if (translations[targetLang] && translations[targetLang][word.toLowerCase()]) {
-            translation = translations[targetLang][word.toLowerCase()];
-        } else {
-            // Create a fake translation
-            translation = `[${providerNames.google}] ${word} → ${targetLang}`;
-        }
-        
-        translationText.textContent = translation;
-    }, 700);
+            return response.json();
+        })
+        .then(data => {
+            // Hide loading
+            loadingIndicator.classList.add('hidden');
+            
+            // Parse the translation result - the first result is the translation
+            if (data && data[0] && data[0][0] && data[0][0][0]) {
+                const translation = data[0][0][0];
+                translationText.textContent = translation;
+            } else {
+                throw new Error('Invalid translation response');
+            }
+        })
+        .catch(error => {
+            console.error('Translation error:', error);
+            showTranslationError(boxElement, "Translation failed. The service might be temporarily unavailable.");
+        });
 }
 
 // Translation implementation for DeepL
@@ -533,23 +542,48 @@ function translateWithDeepL(word, sentence, targetLang, boxElement) {
     const apiKey = settings.apiKeys.deepl;
     
     if (!apiKey) {
-        showTranslationError(boxElement, "API key required for DeepL");
+        showTranslationError(boxElement, "API key required for DeepL. Please add your API key in settings.");
         return;
     }
     
-    // In a real implementation, you would call the DeepL API
-    // For demonstration, we'll just return a simulated response
+    const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
+    const translationText = boxElement.querySelector('.translation-text');
     
-    setTimeout(() => {
-        const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
-        const translationText = boxElement.querySelector('.translation-text');
-        
+    // Show loading indicator
+    loadingIndicator.classList.remove('hidden');
+    
+    // Call the DeepL API
+    const url = 'https://api-free.deepl.com/v2/translate';
+    const formData = new FormData();
+    formData.append('auth_key', apiKey);
+    formData.append('text', word);
+    formData.append('target_lang', targetLang.toUpperCase());
+    
+    fetch(url, {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Translation API error');
+        }
+        return response.json();
+    })
+    .then(data => {
         // Hide loading
         loadingIndicator.classList.add('hidden');
         
-        // Simulate DeepL translation (more formal/precise than Google)
-        translationText.textContent = `[${providerNames.deepl}] ${word} → ${targetLang} (более точный перевод)`;
-    }, 900);
+        // Check for valid response
+        if (data.translations && data.translations.length > 0) {
+            translationText.textContent = data.translations[0].text;
+        } else {
+            throw new Error('Invalid translation response');
+        }
+    })
+    .catch(error => {
+        console.error('Translation error:', error);
+        showTranslationError(boxElement, "Translation failed. Please check your API key and try again.");
+    });
 }
 
 // Translation implementation for Microsoft Translator
@@ -557,22 +591,53 @@ function translateWithMicrosoft(word, sentence, targetLang, boxElement) {
     const apiKey = settings.apiKeys.microsoft;
     
     if (!apiKey) {
-        showTranslationError(boxElement, "API key required for Microsoft Translator");
+        showTranslationError(boxElement, "API key required for Microsoft Translator. Please add your API key in settings.");
         return;
     }
     
-    // In a real implementation, you would call the Microsoft Translator API
+    const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
+    const translationText = boxElement.querySelector('.translation-text');
     
-    setTimeout(() => {
-        const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
-        const translationText = boxElement.querySelector('.translation-text');
-        
+    // Show loading indicator
+    loadingIndicator.classList.remove('hidden');
+    
+    // Call the Microsoft Translator API
+    const url = 'https://api.cognitive.microsofttranslator.com/translate';
+    const params = new URLSearchParams({
+        'api-version': '3.0',
+        'to': targetLang
+    });
+    
+    fetch(`${url}?${params}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Ocp-Apim-Subscription-Key': apiKey,
+            'Ocp-Apim-Subscription-Region': 'global' // Change this to your region
+        },
+        body: JSON.stringify([{ 'text': word }])
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Translation API error');
+        }
+        return response.json();
+    })
+    .then(data => {
         // Hide loading
         loadingIndicator.classList.add('hidden');
         
-        // Simulate Microsoft translation
-        translationText.textContent = `[${providerNames.microsoft}] ${word} → ${targetLang}`;
-    }, 800);
+        // Check for valid response
+        if (data && data.length > 0 && data[0].translations && data[0].translations.length > 0) {
+            translationText.textContent = data[0].translations[0].text;
+        } else {
+            throw new Error('Invalid translation response');
+        }
+    })
+    .catch(error => {
+        console.error('Translation error:', error);
+        showTranslationError(boxElement, "Translation failed. Please check your API key and try again.");
+    });
 }
 
 // Translation implementation for Yandex Translate
@@ -580,22 +645,51 @@ function translateWithYandex(word, sentence, targetLang, boxElement) {
     const apiKey = settings.apiKeys.yandex;
     
     if (!apiKey) {
-        showTranslationError(boxElement, "API key required for Yandex Translate");
+        showTranslationError(boxElement, "API key required for Yandex Translate. Please add your API key in settings.");
         return;
     }
     
-    // In a real implementation, you would call the Yandex Translate API
+    const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
+    const translationText = boxElement.querySelector('.translation-text');
     
-    setTimeout(() => {
-        const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
-        const translationText = boxElement.querySelector('.translation-text');
-        
+    // Show loading indicator
+    loadingIndicator.classList.remove('hidden');
+    
+    // Call the Yandex Translate API
+    const url = 'https://translate.api.cloud.yandex.net/translate/v2/translate';
+    
+    fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Api-Key ${apiKey}`
+        },
+        body: JSON.stringify({
+            texts: [word],
+            targetLanguageCode: targetLang
+        })
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Translation API error');
+        }
+        return response.json();
+    })
+    .then(data => {
         // Hide loading
         loadingIndicator.classList.add('hidden');
         
-        // Simulate Yandex translation (might be better for Russian)
-        translationText.textContent = `[${providerNames.yandex}] ${word} → ${targetLang} (оптимизировано для русского)`;
-    }, 750);
+        // Check for valid response
+        if (data.translations && data.translations.length > 0) {
+            translationText.textContent = data.translations[0].text;
+        } else {
+            throw new Error('Invalid translation response');
+        }
+    })
+    .catch(error => {
+        console.error('Translation error:', error);
+        showTranslationError(boxElement, "Translation failed. Please check your API key and try again.");
+    });
 }
 
 // Translation implementation for OpenAI
@@ -603,25 +697,76 @@ function translateWithOpenAI(word, sentence, targetLang, boxElement) {
     const apiKey = settings.apiKeys.openai;
     
     if (!apiKey) {
-        showTranslationError(boxElement, "API key required for OpenAI");
+        showTranslationError(boxElement, "API key required for OpenAI. Please add your API key in settings.");
         return;
     }
     
-    // In a real implementation, you would call the OpenAI API
+    const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
+    const translationText = boxElement.querySelector('.translation-text');
     
-    setTimeout(() => {
-        const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
-        const translationText = boxElement.querySelector('.translation-text');
-        
+    // Show loading indicator
+    loadingIndicator.classList.remove('hidden');
+    
+    // Define the language to use in the prompt
+    const languageNames = {
+        'ru': 'Russian',
+        'en': 'English',
+        'de': 'German',
+        'fr': 'French',
+        'es': 'Spanish',
+        'zh': 'Chinese',
+        'ja': 'Japanese'
+    };
+    
+    const targetLanguageName = languageNames[targetLang] || targetLang;
+    
+    // Call the OpenAI API
+    const url = 'https://api.openai.com/v1/chat/completions';
+    const contextPrompt = sentence ? `In the context: "${sentence}"` : '';
+    
+    fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+            model: 'gpt-3.5-turbo',
+            messages: [
+                {
+                    role: 'system',
+                    content: `You are a professional translator. Translate the given word to ${targetLanguageName}. Be precise and concise.`
+                },
+                {
+                    role: 'user',
+                    content: `Translate the word "${word}" to ${targetLanguageName}. ${contextPrompt}`
+                }
+            ],
+            temperature: 0.3,
+            max_tokens: 50
+        })
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Translation API error');
+        }
+        return response.json();
+    })
+    .then(data => {
         // Hide loading
         loadingIndicator.classList.add('hidden');
         
-        // Simulate OpenAI translation with context awareness
-        let translation = `[${providerNames.openai}] ${word} → ${targetLang}\n`;
-        translation += `Контекстный перевод с учетом фразы: "${sentence.substring(0, 30)}..."`;
-        
-        translationText.textContent = translation;
-    }, 1200);
+        // Check for valid response
+        if (data.choices && data.choices.length > 0 && data.choices[0].message) {
+            translationText.textContent = data.choices[0].message.content.trim();
+        } else {
+            throw new Error('Invalid translation response');
+        }
+    })
+    .catch(error => {
+        console.error('Translation error:', error);
+        showTranslationError(boxElement, "Translation failed. Please check your API key and try again.");
+    });
 }
 
 // Translation implementation for Claude
@@ -629,25 +774,72 @@ function translateWithClaude(word, sentence, targetLang, boxElement) {
     const apiKey = settings.apiKeys.claude;
     
     if (!apiKey) {
-        showTranslationError(boxElement, "API key required for Claude");
+        showTranslationError(boxElement, "API key required for Claude. Please add your API key in settings.");
         return;
     }
     
-    // In a real implementation, you would call the Claude API
+    const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
+    const translationText = boxElement.querySelector('.translation-text');
     
-    setTimeout(() => {
-        const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
-        const translationText = boxElement.querySelector('.translation-text');
-        
+    // Show loading indicator
+    loadingIndicator.classList.remove('hidden');
+    
+    // Define the language to use in the prompt
+    const languageNames = {
+        'ru': 'Russian',
+        'en': 'English',
+        'de': 'German',
+        'fr': 'French',
+        'es': 'Spanish',
+        'zh': 'Chinese',
+        'ja': 'Japanese'
+    };
+    
+    const targetLanguageName = languageNames[targetLang] || targetLang;
+    
+    // Call the Claude API
+    const url = 'https://api.anthropic.com/v1/messages';
+    const contextPrompt = sentence ? `Consider the context: "${sentence}"` : '';
+    
+    fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+            model: 'claude-3-haiku-20240307',
+            max_tokens: 100,
+            messages: [
+                {
+                    role: 'user',
+                    content: `Translate the word "${word}" to ${targetLanguageName}. ${contextPrompt} Only provide the translation, without any explanations or additional text.`
+                }
+            ]
+        })
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Translation API error');
+        }
+        return response.json();
+    })
+    .then(data => {
         // Hide loading
         loadingIndicator.classList.add('hidden');
         
-        // Simulate Claude translation with explanations
-        let translation = `[${providerNames.claude}] ${word} → ${targetLang}\n`;
-        translation += `Основной перевод: [перевод слова]\nАльтернативы: [альтернативы]\nПояснение: [краткое пояснение]`;
-        
-        translationText.textContent = translation;
-    }, 1100);
+        // Check for valid response
+        if (data.content && data.content.length > 0) {
+            translationText.textContent = data.content[0].text.trim();
+        } else {
+            throw new Error('Invalid translation response');
+        }
+    })
+    .catch(error => {
+        console.error('Translation error:', error);
+        showTranslationError(boxElement, "Translation failed. Please check your API key and try again.");
+    });
 }
 
 // Show translation error
@@ -661,7 +853,7 @@ function showTranslationError(boxElement, errorMessage) {
     translationText.textContent = '';
     
     // Show error
-    errorElement.textContent = errorMessage || "Ошибка перевода. Пожалуйста, попробуйте еще раз.";
+    errorElement.textContent = errorMessage || "Translation error. Please try again.";
     errorElement.classList.remove('hidden');
 }
 
