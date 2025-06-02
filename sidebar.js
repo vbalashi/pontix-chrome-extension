@@ -8,6 +8,19 @@ const backButton = document.getElementById("back-button");
 const saveSettingsButton = document.getElementById("save-settings");
 const appContainer = document.querySelector(".app-container");
 
+// Profile-related DOM elements
+const profileDropdown = document.getElementById("profile-dropdown");
+const loadProfileButton = document.getElementById("load-profile-button");
+const saveProfileButton = document.getElementById("save-profile-button");
+const profilesList = document.getElementById("profiles-list");
+const createProfileButton = document.getElementById("create-profile-button");
+const profileModalOverlay = document.getElementById("profile-modal-overlay");
+const modalTitle = document.getElementById("modal-title");
+const profileNameInput = document.getElementById("profile-name-input");
+const modalClose = document.getElementById("modal-close");
+const modalCancel = document.getElementById("modal-cancel");
+const modalSave = document.getElementById("modal-save");
+
 // Default settings
 let settings = {
     maxWordCount: 25, // Default maximum word count for translation
@@ -34,6 +47,11 @@ let settings = {
         { provider: "google", targetLanguage: "ru" }
     ]
 };
+
+// Profile management
+let profiles = {};
+let currentProfileName = null;
+let editingProfileName = null; // Used when editing profile name in modal
 
 // Current state
 let currentWord = "";
@@ -63,6 +81,361 @@ const providerNames = {
     gemini: "Gemini"
 };
 
+// ====================
+// PROFILE MANAGEMENT
+// ====================
+
+// Load profiles from storage
+function loadProfiles() {
+    console.log('LoadProfiles: Loading profiles from storage...');
+    
+    if (typeof chrome === 'undefined' || !chrome.storage) {
+        console.warn('LoadProfiles: Chrome storage API not available');
+        profiles = { "Default": JSON.parse(JSON.stringify(settings)) };
+        updateProfileDropdown();
+        updateProfilesList();
+        return;
+    }
+    
+    chrome.storage.sync.get(["translatorProfiles", "currentProfile"], (result) => {
+        if (chrome.runtime.lastError) {
+            console.error('LoadProfiles: Chrome runtime error:', chrome.runtime.lastError);
+            profiles = { "Default": JSON.parse(JSON.stringify(settings)) };
+        } else {
+            profiles = result.translatorProfiles || { "Default": JSON.parse(JSON.stringify(settings)) };
+            currentProfileName = result.currentProfile || null;
+            
+            console.log('LoadProfiles: Loaded profiles:', Object.keys(profiles));
+            console.log('LoadProfiles: Current profile:', currentProfileName);
+        }
+        
+        updateProfileDropdown();
+        updateProfilesList();
+        
+        // Load current profile if set
+        if (currentProfileName && profiles[currentProfileName]) {
+            loadProfile(currentProfileName, false); // false = don't save settings before loading
+        }
+    });
+}
+
+// Save profiles to storage
+function saveProfiles() {
+    console.log('SaveProfiles: Saving profiles to storage...');
+    console.log('SaveProfiles: Profiles to save:', Object.keys(profiles));
+    
+    if (typeof chrome === 'undefined' || !chrome.storage) {
+        console.warn('SaveProfiles: Chrome storage API not available');
+        return;
+    }
+    
+    chrome.storage.sync.set({ 
+        "translatorProfiles": profiles,
+        "currentProfile": currentProfileName
+    }, () => {
+        if (chrome.runtime.lastError) {
+            console.error('SaveProfiles: Error saving profiles:', chrome.runtime.lastError);
+        } else {
+            console.log('SaveProfiles: Profiles saved successfully');
+        }
+    });
+}
+
+// Create a new profile
+function createProfile(profileName) {
+    if (!profileName || profileName.trim() === '') {
+        console.error('CreateProfile: Invalid profile name');
+        return false;
+    }
+    
+    profileName = profileName.trim();
+    
+    if (profiles[profileName]) {
+        console.error('CreateProfile: Profile already exists:', profileName);
+        return false;
+    }
+    
+    // Capture current settings as new profile
+    const currentSettings = getCurrentSettings();
+    profiles[profileName] = JSON.parse(JSON.stringify(currentSettings));
+    
+    console.log('CreateProfile: Created profile:', profileName);
+    
+    saveProfiles();
+    updateProfileDropdown();
+    updateProfilesList();
+    
+    return true;
+}
+
+// Load a profile
+function loadProfile(profileName, saveCurrentFirst = true) {
+    if (!profiles[profileName]) {
+        console.error('LoadProfile: Profile not found:', profileName);
+        return false;
+    }
+    
+    console.log('LoadProfile: Loading profile:', profileName);
+    
+    // Save current settings to current profile if specified
+    if (saveCurrentFirst && currentProfileName && profiles[currentProfileName]) {
+        const currentSettings = getCurrentSettings();
+        profiles[currentProfileName] = JSON.parse(JSON.stringify(currentSettings));
+        console.log('LoadProfile: Saved current settings to:', currentProfileName);
+    }
+    
+    // Load new profile
+    const profileSettings = profiles[profileName];
+    settings = JSON.parse(JSON.stringify(profileSettings));
+    currentProfileName = profileName;
+    
+    console.log('LoadProfile: Loaded settings for profile:', profileName);
+    
+    // Update UI
+    updateSettingsUI();
+    restoreTranslationBoxes();
+    updateProfileDropdown();
+    updateProfilesList();
+    
+    // Save current profile reference
+    saveProfiles();
+    
+    return true;
+}
+
+// Save current settings to profile
+function saveToProfile(profileName) {
+    if (!profileName || profileName.trim() === '') {
+        console.error('SaveToProfile: Invalid profile name');
+        return false;
+    }
+    
+    profileName = profileName.trim();
+    
+    const currentSettings = getCurrentSettings();
+    profiles[profileName] = JSON.parse(JSON.stringify(currentSettings));
+    currentProfileName = profileName;
+    
+    console.log('SaveToProfile: Saved current settings to profile:', profileName);
+    
+    saveProfiles();
+    updateProfileDropdown();
+    updateProfilesList();
+    
+    return true;
+}
+
+// Delete a profile
+function deleteProfile(profileName) {
+    if (!profiles[profileName]) {
+        console.error('DeleteProfile: Profile not found:', profileName);
+        return false;
+    }
+    
+    // Don't allow deleting the last profile
+    if (Object.keys(profiles).length <= 1) {
+        console.warn('DeleteProfile: Cannot delete the last profile');
+        return false;
+    }
+    
+    delete profiles[profileName];
+    
+    // If we deleted the current profile, switch to first available
+    if (currentProfileName === profileName) {
+        const firstProfileName = Object.keys(profiles)[0];
+        loadProfile(firstProfileName, false);
+    }
+    
+    console.log('DeleteProfile: Deleted profile:', profileName);
+    
+    saveProfiles();
+    updateProfileDropdown();
+    updateProfilesList();
+    
+    return true;
+}
+
+// Get current settings including translation boxes
+function getCurrentSettings() {
+    // Get current translation boxes layout
+    const boxes = document.querySelectorAll('.translation-box');
+    const translationBoxes = [];
+    
+    boxes.forEach(box => {
+        const provider = box.getAttribute('data-provider');
+        const langSelect = box.querySelector('.language-select');
+        const targetLanguage = langSelect ? langSelect.value : settings.defaultTargetLanguage;
+        
+        // Get model if it's an AI provider
+        let model = null;
+        const modelSelect = box.querySelector('.model-select');
+        if (modelSelect) {
+            model = modelSelect.value;
+        }
+        
+        const boxConfig = {
+            provider: provider,
+            targetLanguage: targetLanguage
+        };
+        
+        if (model) {
+            boxConfig.model = model;
+        }
+        
+        translationBoxes.push(boxConfig);
+    });
+    
+    // Get current settings from UI
+    const maxWordCountInput = document.getElementById('max-word-count');
+    const maxWordCount = maxWordCountInput ? parseInt(maxWordCountInput.value) || 25 : settings.maxWordCount;
+    
+    // Get enabled providers from checkboxes
+    const enabledProviders = {};
+    for (const provider in settings.enabledProviders) {
+        const checkbox = document.getElementById(`enable-${provider}`);
+        enabledProviders[provider] = checkbox ? checkbox.checked : settings.enabledProviders[provider];
+    }
+    
+    // Get API keys from inputs
+    const apiKeys = {};
+    for (const provider in settings.apiKeys) {
+        const input = document.getElementById(`${provider}-api-key`);
+        apiKeys[provider] = input ? input.value : settings.apiKeys[provider];
+    }
+    
+    return {
+        maxWordCount: maxWordCount,
+        enabledProviders: enabledProviders,
+        apiKeys: apiKeys,
+        defaultTargetLanguage: settings.defaultTargetLanguage,
+        translationBoxes: translationBoxes
+    };
+}
+
+// Update profile dropdown
+function updateProfileDropdown() {
+    console.log('UpdateProfileDropdown: Updating dropdown with profiles:', Object.keys(profiles));
+    
+    const selectedValue = profileDropdown.value;
+    
+    // Clear existing options except create new
+    profileDropdown.innerHTML = `
+        <option value="" disabled ${!currentProfileName ? 'selected' : ''}>Select profile</option>
+        <option value="__create_new__">Create new...</option>
+    `;
+    
+    // Add profile options
+    Object.keys(profiles).forEach(profileName => {
+        const option = document.createElement('option');
+        option.value = profileName;
+        option.textContent = profileName;
+        option.selected = profileName === currentProfileName;
+        profileDropdown.appendChild(option);
+    });
+    
+    console.log('UpdateProfileDropdown: Current profile selected:', currentProfileName);
+}
+
+// Update profiles list in settings
+function updateProfilesList() {
+    console.log('UpdateProfilesList: Updating profiles list');
+    
+    profilesList.innerHTML = '';
+    
+    if (Object.keys(profiles).length === 0) {
+        profilesList.innerHTML = '<p class="no-profiles">No profiles found. Create a new profile to get started.</p>';
+        return;
+    }
+    
+    Object.keys(profiles).forEach(profileName => {
+        const isActive = profileName === currentProfileName;
+        
+        const profileItem = document.createElement('div');
+        profileItem.className = `profile-item ${isActive ? 'active' : ''}`;
+        
+        profileItem.innerHTML = `
+            <span class="profile-name">${profileName}</span>
+            <div class="profile-actions-buttons">
+                <button class="profile-action-button edit-profile" data-profile="${profileName}">Rename</button>
+                <button class="profile-action-button delete-profile" data-profile="${profileName}" ${Object.keys(profiles).length <= 1 ? 'disabled' : ''}>Delete</button>
+            </div>
+        `;
+        
+        profilesList.appendChild(profileItem);
+    });
+}
+
+// Show profile modal
+function showProfileModal(mode = 'create', profileName = '') {
+    editingProfileName = mode === 'edit' ? profileName : null;
+    
+    modalTitle.textContent = mode === 'create' ? 'Create New Profile' : 'Rename Profile';
+    profileNameInput.value = profileName;
+    profileNameInput.placeholder = mode === 'create' ? 'Enter profile name' : 'Enter new profile name';
+    
+    profileModalOverlay.classList.remove('hidden');
+    profileNameInput.focus();
+}
+
+// Hide profile modal
+function hideProfileModal() {
+    profileModalOverlay.classList.add('hidden');
+    profileNameInput.value = '';
+    editingProfileName = null;
+}
+
+// Handle profile modal save
+function handleProfileModalSave() {
+    const profileName = profileNameInput.value.trim();
+    
+    if (!profileName) {
+        alert('Please enter a profile name.');
+        return;
+    }
+    
+    if (editingProfileName) {
+        // Rename existing profile
+        if (profileName === editingProfileName) {
+            hideProfileModal();
+            return; // No change
+        }
+        
+        if (profiles[profileName]) {
+            alert('A profile with this name already exists.');
+            return;
+        }
+        
+        // Rename profile
+        profiles[profileName] = profiles[editingProfileName];
+        delete profiles[editingProfileName];
+        
+        if (currentProfileName === editingProfileName) {
+            currentProfileName = profileName;
+        }
+        
+        console.log('HandleProfileModalSave: Renamed profile from', editingProfileName, 'to', profileName);
+        
+        saveProfiles();
+        updateProfileDropdown();
+        updateProfilesList();
+    } else {
+        // Create new profile
+        if (createProfile(profileName)) {
+            // Switch to new profile
+            loadProfile(profileName);
+        } else {
+            alert('Failed to create profile. It might already exist.');
+            return;
+        }
+    }
+    
+    hideProfileModal();
+}
+
+// ====================
+// END PROFILE MANAGEMENT
+// ====================
+
 // Force refresh all provider dropdowns immediately
 function forceRefreshAllProviderDropdowns() {
     console.log('🔄 FORCE REFRESH ALL PROVIDER DROPDOWNS');
@@ -90,6 +463,8 @@ function forceRefreshAllProviderDropdowns() {
 function debugTranslator() {
     console.log('=== TRANSLATOR DEBUG INFO ===');
     console.log('Current settings:', settings);
+    console.log('Current profile:', currentProfileName);
+    console.log('Available profiles:', Object.keys(profiles));
     console.log('Translation boxes in DOM:', translationsContainer ? translationsContainer.children.length : 'Container not found');
     
     if (translationsContainer) {
@@ -108,15 +483,6 @@ function debugTranslator() {
             options: Array.from(select.options).map(opt => opt.value)
         });
     });
-    
-    // Check storage directly
-    if (typeof chrome !== 'undefined' && chrome.storage) {
-        chrome.storage.sync.get("translatorSettings", (result) => {
-            console.log('Storage contents:', result);
-        });
-    } else {
-        console.log('Chrome storage not available');
-    }
     
     console.log('=== END DEBUG INFO ===');
 }
@@ -177,9 +543,9 @@ function initializeSidebar() {
         console.log('Setting up event listeners...');
         setupEventListeners();
         
-        // Load saved settings (this will also restore translation boxes)
-        console.log('Loading settings...');
-        loadSettings();
+        // Load profiles and current profile
+        console.log('Loading profiles...');
+        loadProfiles();
         
         // Post a message to parent window to indicate sidebar is ready
         if (window.parent && window.parent !== window) {
@@ -302,10 +668,23 @@ function saveTranslationBoxesLayout() {
         const langSelect = box.querySelector('.language-select');
         const targetLanguage = langSelect ? langSelect.value : settings.defaultTargetLanguage;
         
-        settings.translationBoxes.push({
+        // Get model if it's an AI provider
+        let model = null;
+        const modelSelect = box.querySelector('.model-select');
+        if (modelSelect) {
+            model = modelSelect.value;
+        }
+        
+        const boxConfig = {
             provider: provider,
             targetLanguage: targetLanguage
-        });
+        };
+        
+        if (model) {
+            boxConfig.model = model;
+        }
+        
+        settings.translationBoxes.push(boxConfig);
     });
     
     console.log('Saved translation boxes layout:', settings.translationBoxes);
@@ -348,7 +727,7 @@ function restoreTranslationBoxes() {
         // Only restore if the provider is still enabled
         if (settings.enabledProviders[boxConfig.provider]) {
             console.log(`Restoring box for ${boxConfig.provider} with language ${boxConfig.targetLanguage}`);
-            addTranslationBox(boxConfig.provider, boxConfig.targetLanguage);
+            addTranslationBox(boxConfig.provider, boxConfig.targetLanguage, boxConfig.model);
             restoredCount++;
         } else {
             console.log(`Skipping disabled provider: ${boxConfig.provider}`);
@@ -403,6 +782,83 @@ function setupEventListeners() {
     // Listen for messages from content script
     window.addEventListener("message", handleContentScriptMessage);
     
+    // Profile dropdown change
+    profileDropdown.addEventListener("change", (e) => {
+        if (e.target.value === "__create_new__") {
+            showProfileModal('create');
+            // Reset dropdown to current profile
+            setTimeout(() => {
+                updateProfileDropdown();
+            }, 100);
+        }
+    });
+    
+    // Load profile button
+    loadProfileButton.addEventListener("click", () => {
+        const selectedProfile = profileDropdown.value;
+        if (selectedProfile && selectedProfile !== "__create_new__" && profiles[selectedProfile]) {
+            loadProfile(selectedProfile);
+        } else {
+            alert('Please select a profile to load.');
+        }
+    });
+    
+    // Save profile button
+    saveProfileButton.addEventListener("click", () => {
+        const selectedProfile = profileDropdown.value;
+        if (selectedProfile && selectedProfile !== "__create_new__") {
+            saveToProfile(selectedProfile);
+            alert(`Profile "${selectedProfile}" saved successfully!`);
+        } else {
+            // Show modal to create new profile
+            showProfileModal('create');
+        }
+    });
+    
+    // Create profile button in settings
+    createProfileButton.addEventListener("click", () => {
+        showProfileModal('create');
+    });
+    
+    // Profile list actions (using event delegation)
+    profilesList.addEventListener("click", (e) => {
+        if (e.target.classList.contains('edit-profile')) {
+            const profileName = e.target.getAttribute('data-profile');
+            showProfileModal('edit', profileName);
+        } else if (e.target.classList.contains('delete-profile')) {
+            const profileName = e.target.getAttribute('data-profile');
+            if (confirm(`Are you sure you want to delete the profile "${profileName}"?`)) {
+                deleteProfile(profileName);
+            }
+        }
+    });
+    
+    // Modal event listeners
+    modalClose.addEventListener("click", hideProfileModal);
+    modalCancel.addEventListener("click", hideProfileModal);
+    modalSave.addEventListener("click", handleProfileModalSave);
+    
+    // Close modal on overlay click
+    profileModalOverlay.addEventListener("click", (e) => {
+        if (e.target === profileModalOverlay) {
+            hideProfileModal();
+        }
+    });
+    
+    // Close modal on Escape key
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && !profileModalOverlay.classList.contains('hidden')) {
+            hideProfileModal();
+        }
+    });
+    
+    // Save on Enter in modal
+    profileNameInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            handleProfileModalSave();
+        }
+    });
+    
     // Add translation button
     addTranslationButton.addEventListener("click", () => {
         // Find first enabled provider that isn't already used
@@ -423,7 +879,11 @@ function setupEventListeners() {
         
         // Save the updated layout
         saveTranslationBoxesLayout();
-        saveSettings();
+        
+        // Save to current profile if one is active
+        if (currentProfileName) {
+            saveToProfile(currentProfileName);
+        }
     });
     
     // Global settings button - slide to settings page
@@ -470,7 +930,10 @@ function setupEventListeners() {
         
         console.log('Settings after update:', settings);
         
-        saveSettings();
+        // Save to current profile if one is active
+        if (currentProfileName) {
+            saveToProfile(currentProfileName);
+        }
         
         // Slide back to main page
         appContainer.classList.remove("settings-open");
@@ -559,7 +1022,11 @@ function handleTranslationsContainerClick(event) {
             
             // Save the updated layout
             saveTranslationBoxesLayout();
-            saveSettings();
+            
+            // Save to current profile if one is active
+            if (currentProfileName) {
+                saveToProfile(currentProfileName);
+            }
         } else {
             // Don't remove the last box, just reset it
             const provider = box.getAttribute('data-provider');
@@ -644,7 +1111,11 @@ function handleTranslationsContainerChange(event) {
         
         // Save the updated layout
         saveTranslationBoxesLayout();
-        saveSettings();
+        
+        // Save to current profile if one is active
+        if (currentProfileName) {
+            saveToProfile(currentProfileName);
+        }
     }
     
     // Language selection change
@@ -665,7 +1136,11 @@ function handleTranslationsContainerChange(event) {
         
         // Save the updated layout
         saveTranslationBoxesLayout();
-        saveSettings();
+        
+        // Save to current profile if one is active
+        if (currentProfileName) {
+            saveToProfile(currentProfileName);
+        }
     }
     
     // Model selection change
@@ -684,12 +1159,16 @@ function handleTranslationsContainerChange(event) {
         
         // Save the updated layout
         saveTranslationBoxesLayout();
-        saveSettings();
+        
+        // Save to current profile if one is active
+        if (currentProfileName) {
+            saveToProfile(currentProfileName);
+        }
     }
 }
 
 // Add a new translation box
-function addTranslationBox(provider, targetLang) {
+function addTranslationBox(provider, targetLang, model = null) {
     translationBoxCounter++;
     const boxId = `translation-box-${translationBoxCounter}`;
     
@@ -786,6 +1265,21 @@ function addTranslationBox(provider, targetLang) {
     
     // Add box to container
     translationsContainer.appendChild(boxDiv);
+    
+    // Set the model if provided and it's an AI provider
+    if (model && (provider === 'openai' || provider === 'claude' || provider === 'gemini')) {
+        const modelSelect = boxDiv.querySelector('.model-select');
+        if (modelSelect) {
+            // Check if the model value exists in the options
+            const modelOption = Array.from(modelSelect.options).find(option => option.value === model);
+            if (modelOption) {
+                modelSelect.value = model;
+                console.log(`Set model to ${model} for ${provider} provider`);
+            } else {
+                console.warn(`Model ${model} not found in options for ${provider}, using default`);
+            }
+        }
+    }
     
     // Translate if we have a word
     if (currentWord) {
