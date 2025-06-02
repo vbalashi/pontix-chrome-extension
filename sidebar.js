@@ -1317,27 +1317,43 @@ function translateWithOpenAI(word, sentence, targetLang, boxElement) {
     const url = 'https://api.openai.com/v1/chat/completions';
     const contextPrompt = sentence ? `In the context: "${sentence}"` : '';
     
+    // Create the request payload
+    const systemMessage = `You are a professional translator. Translate the given word to ${targetLanguageName}. Be precise and concise.`;
+    const userMessage = `Translate the word "${word}" to ${targetLanguageName}. ${contextPrompt}`;
+    
+    const requestPayload = {
+        model: modelName,
+        messages: [
+            {
+                role: 'system',
+                content: systemMessage
+            },
+            {
+                role: 'user',
+                content: userMessage
+            }
+        ],
+        temperature: 0.3,
+        max_tokens: 50
+    };
+    
+    // Debug: Log the prompt being sent
+    console.log('🤖 OpenAI Translation Debug:');
+    console.log('- Model:', modelName);
+    console.log('- Word to translate:', word);
+    console.log('- Target language:', targetLanguageName);
+    console.log('- Context:', sentence || 'None');
+    console.log('- System message:', systemMessage);
+    console.log('- User message:', userMessage);
+    console.log('- Full request payload:', requestPayload);
+    
     fetch(url, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${apiKey}`
         },
-        body: JSON.stringify({
-            model: modelName,
-            messages: [
-                {
-                    role: 'system',
-                    content: `You are a professional translator. Translate the given word to ${targetLanguageName}. Be precise and concise.`
-                },
-                {
-                    role: 'user',
-                    content: `Translate the word "${word}" to ${targetLanguageName}. ${contextPrompt}`
-                }
-            ],
-            temperature: 0.3,
-            max_tokens: 50
-        })
+        body: JSON.stringify(requestPayload)
     })
     .then(response => {
         if (!response.ok) {
@@ -1346,18 +1362,28 @@ function translateWithOpenAI(word, sentence, targetLang, boxElement) {
         return response.json();
     })
     .then(data => {
+        // Debug: Log the full response received
+        console.log('🤖 OpenAI Response received:', data);
+        
         // Hide loading
         loadingIndicator.classList.add('hidden');
         
         // Check for valid response
         if (data.choices && data.choices.length > 0 && data.choices[0].message) {
-            translationText.textContent = data.choices[0].message.content.trim();
+            const translatedText = data.choices[0].message.content.trim();
+            
+            // Debug: Log the extracted translation
+            console.log('🤖 OpenAI Translation result:', translatedText);
+            console.log('🤖 OpenAI Token usage:', data.usage);
+            
+            translationText.textContent = translatedText;
         } else {
+            console.error('🤖 OpenAI Invalid response structure:', data);
             throw new Error('Invalid translation response');
         }
     })
     .catch(error => {
-        console.error('Translation error:', error);
+        console.error('🤖 OpenAI Translation error:', error);
         showTranslationError(boxElement, "Translation failed. Please check your API key and try again.");
     });
 }
@@ -1397,6 +1423,27 @@ function translateWithClaude(word, sentence, targetLang, boxElement) {
     // Call the Claude API
     const url = 'https://api.anthropic.com/v1/messages';
     const contextPrompt = sentence ? `Consider the context: "${sentence}"` : '';
+    const userMessage = `Translate the word "${word}" to ${targetLanguageName}. ${contextPrompt} Only provide the translation, without any explanations or additional text.`;
+    
+    const requestPayload = {
+        model: modelName,
+        max_tokens: 100,
+        messages: [
+            {
+                role: 'user',
+                content: userMessage
+            }
+        ]
+    };
+    
+    // Debug: Log the prompt being sent
+    console.log('🧠 Claude Translation Debug:');
+    console.log('- Model:', modelName);
+    console.log('- Word to translate:', word);
+    console.log('- Target language:', targetLanguageName);
+    console.log('- Context:', sentence || 'None');
+    console.log('- User message:', userMessage);
+    console.log('- Full request payload:', requestPayload);
     
     fetch(url, {
         method: 'POST',
@@ -1405,16 +1452,7 @@ function translateWithClaude(word, sentence, targetLang, boxElement) {
             'x-api-key': apiKey,
             'anthropic-version': '2023-06-01'
         },
-        body: JSON.stringify({
-            model: modelName,
-            max_tokens: 100,
-            messages: [
-                {
-                    role: 'user',
-                    content: `Translate the word "${word}" to ${targetLanguageName}. ${contextPrompt} Only provide the translation, without any explanations or additional text.`
-                }
-            ]
-        })
+        body: JSON.stringify(requestPayload)
     })
     .then(response => {
         if (!response.ok) {
@@ -1423,18 +1461,28 @@ function translateWithClaude(word, sentence, targetLang, boxElement) {
         return response.json();
     })
     .then(data => {
+        // Debug: Log the full response received
+        console.log('🧠 Claude Response received:', data);
+        
         // Hide loading
         loadingIndicator.classList.add('hidden');
         
         // Check for valid response
         if (data.content && data.content.length > 0) {
-            translationText.textContent = data.content[0].text.trim();
+            const translatedText = data.content[0].text.trim();
+            
+            // Debug: Log the extracted translation
+            console.log('🧠 Claude Translation result:', translatedText);
+            console.log('🧠 Claude Usage info:', data.usage);
+            
+            translationText.textContent = translatedText;
         } else {
+            console.error('🧠 Claude Invalid response structure:', data);
             throw new Error('Invalid translation response');
         }
     })
     .catch(error => {
-        console.error('Translation error:', error);
+        console.error('🧠 Claude Translation error:', error);
         showTranslationError(boxElement, "Translation failed. Please check your API key and try again.");
     });
 }
@@ -1474,23 +1522,36 @@ function translateWithGemini(word, sentence, targetLang, boxElement) {
     // Call the Gemini API
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
     const contextPrompt = sentence ? `Consider the context: "${sentence}"` : '';
+    const promptText = `Translate the word "${word}" to ${targetLanguageName}. ${contextPrompt} Only provide the translation, without any explanations or additional text.`;
+    
+    const requestPayload = {
+        contents: [
+            {
+                parts: [
+                    {
+                        text: promptText
+                    }
+                ]
+            }
+        ]
+    };
+    
+    // Debug: Log the prompt being sent
+    console.log('💎 Gemini Translation Debug:');
+    console.log('- Model:', modelName);
+    console.log('- Word to translate:', word);
+    console.log('- Target language:', targetLanguageName);
+    console.log('- Context:', sentence || 'None');
+    console.log('- Prompt text:', promptText);
+    console.log('- Full request payload:', requestPayload);
+    console.log('- API URL:', url.replace(apiKey, '[API_KEY_HIDDEN]'));
     
     fetch(url, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-            contents: [
-                {
-                    parts: [
-                        {
-                            text: `Translate the word "${word}" to ${targetLanguageName}. ${contextPrompt} Only provide the translation, without any explanations or additional text.`
-                        }
-                    ]
-                }
-            ]
-        })
+        body: JSON.stringify(requestPayload)
     })
     .then(response => {
         if (!response.ok) {
@@ -1499,18 +1560,29 @@ function translateWithGemini(word, sentence, targetLang, boxElement) {
         return response.json();
     })
     .then(data => {
+        // Debug: Log the full response received
+        console.log('💎 Gemini Response received:', data);
+        
         // Hide loading
         loadingIndicator.classList.add('hidden');
         
         // Check for valid response
         if (data.candidates && data.candidates.length > 0 && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts.length > 0) {
-            translationText.textContent = data.candidates[0].content.parts[0].text.trim();
+            const translatedText = data.candidates[0].content.parts[0].text.trim();
+            
+            // Debug: Log the extracted translation
+            console.log('💎 Gemini Translation result:', translatedText);
+            console.log('💎 Gemini Usage metadata:', data.usageMetadata);
+            console.log('💎 Gemini Safety ratings:', data.candidates[0].safetyRatings);
+            
+            translationText.textContent = translatedText;
         } else {
+            console.error('💎 Gemini Invalid response structure:', data);
             throw new Error('Invalid translation response');
         }
     })
     .catch(error => {
-        console.error('Translation error:', error);
+        console.error('💎 Gemini Translation error:', error);
         showTranslationError(boxElement, "Translation failed. Please check your API key and try again.");
     });
 }

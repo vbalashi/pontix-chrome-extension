@@ -14,6 +14,11 @@ if (window.translatorExtensionLoaded) {
     let sidebarEnabled = false;
     let sidebarVisible = false;
     let isEdgeImmersiveMode = false;
+    let currentWord = "";
+    let currentSentence = "";
+    
+    // Configuration
+    let maxWordCount = 25; // Default maximum word count for translation
     
     // Check if we're in Edge immersive reader mode
     function checkEdgeImmersiveMode() {
@@ -416,7 +421,6 @@ function createSidebar() {
     let isSelecting = false;
     let lastProcessedSelection = "";
     let isMouseDown = false;
-    let maxWordCount = 25; // Default, will be loaded from settings
 
     // Handle text selection changes - this fires during selection (for monitoring only)
     function handleSelectionChange() {
@@ -513,6 +517,10 @@ function createSidebar() {
         const sentence = extractSentence(selection);
         console.log("📝 Extracted sentence:", sentence.substring(0, 100) + "...");
         
+        // Store for potential later use
+        currentWord = word;
+        currentSentence = sentence;
+        
         // Create sidebar if it doesn't exist
         let needsCreation = true;
         
@@ -539,7 +547,8 @@ function createSidebar() {
             }
         }
         
-        // Send data to sidebar with the selected text
+        // Update sidebar with the selection
+        console.log("📤 Updating sidebar with selection:", word);
         updateSidebar(word, sentence, selectedText);
         console.log("📤 Sent to sidebar - Word:", word, "Sentence length:", sentence.length);
     }
