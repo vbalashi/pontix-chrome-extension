@@ -20,6 +20,16 @@ if (window.translatorExtensionLoaded) {
     // Configuration
     let maxWordCount = 25; // Default maximum word count for translation
     
+    // Flag to track if selection handlers are set up
+    let hasSelectionHandlers = false;
+    
+    // Selection tracking variables
+    let lastSelection = "";
+    let lastProcessedSelection = "";
+    let isSelecting = false;
+    let isMouseDown = false;
+    let selectionTimeout = null;
+    
     // Check if we're in Edge immersive reader mode
     function checkEdgeImmersiveMode() {
         // Edge immersive reader typically adds these classes or elements
@@ -36,15 +46,62 @@ if (window.translatorExtensionLoaded) {
         );
     }
     
+    // Enhanced detection for Angular readers and dynamic content
+    function checkAngularReaderMode() {
+        return (
+            document.querySelector('[ng-app]') !== null ||
+            document.querySelector('[data-ng-app]') !== null ||
+            document.querySelector('body[ng-app]') !== null ||
+            window.angular !== undefined ||
+            // Check for common reader containers
+            document.querySelector('.content') !== null ||
+            document.querySelector('#content') !== null ||
+            document.querySelector('[class*="reader"]') !== null ||
+            document.querySelector('[class*="book"]') !== null ||
+            document.querySelector('[ng-view]') !== null
+        );
+    }
+    
     // Initialize and check for Edge immersive reader
     function initializeExtension() {
         isEdgeImmersiveMode = checkEdgeImmersiveMode();
+        const isAngularReader = checkAngularReaderMode();
+        
+        console.log("🔍 Detected environments:", { 
+            isEdgeImmersiveMode, 
+            isAngularReader,
+            hasAngular: typeof angular !== 'undefined',
+            hasNgView: !!document.querySelector('[ng-view]')
+        });
         
         // Load settings from storage
         loadExtensionSettings();
         
-        // If in immersive mode, we need a different approach
-        if (isEdgeImmersiveMode) {
+        // For Angular apps, we need to wait for content to load
+        if (isAngularReader) {
+            console.log("📚 Angular reader detected, setting up enhanced observers");
+            setupAngularContentObserver();
+            
+            // Also wait for Angular to bootstrap
+            if (typeof angular !== 'undefined') {
+                // Wait for Angular to be ready
+                setTimeout(() => {
+                    setupSelectionHandlers();
+                    monitorExistingIframes(); // Check for EPUB iframes
+                }, 2000);
+            } else {
+                // If Angular isn't loaded yet, wait longer
+                setTimeout(() => {
+                    setupSelectionHandlers();
+                    monitorExistingIframes(); // Check for EPUB iframes
+                }, 5000);
+            }
+            
+            // Set up aggressive monitoring as fallback for copy-protected content
+            setTimeout(() => {
+                setupAggressiveSelectionMonitoring();
+            }, 3000);
+        } else if (isEdgeImmersiveMode) {
             console.log("Edge immersive reader mode detected");
             // We'll use MutationObserver to detect when content is loaded in immersive mode
             setupImmersiveModeObserver();
@@ -55,11 +112,18 @@ if (window.translatorExtensionLoaded) {
                     ensureSidebarLoaded();
                 }
             }, 2000);
+        } else {
+            // Standard setup for regular pages
+            setupSelectionHandlers();
         }
         
-        // Notify background script that content script is loaded
+        // Notify background script
         try {
-            chrome.runtime.sendMessage({ action: "contentScriptLoaded", isImmersiveMode: isEdgeImmersiveMode });
+            chrome.runtime.sendMessage({ 
+                action: "contentScriptLoaded", 
+                isImmersiveMode: isEdgeImmersiveMode,
+                isAngularReader: isAngularReader
+            });
         } catch (e) {
             console.log("Error sending contentScriptLoaded message:", e);
         }
@@ -88,7 +152,7 @@ if (window.translatorExtensionLoaded) {
                 if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
                     // If content is added and sidebar is enabled, make sure it's visible
                     if (sidebarEnabled && !document.getElementById("translator-sidebar")) {
-        createSidebar();
+                        createSidebar();
                         sidebarVisible = true;
                         
                         // In immersive mode, we need to adjust differently
@@ -129,6 +193,824 @@ if (window.translatorExtensionLoaded) {
         }
     }
     
+    // Enhanced observer for Angular content changes
+    function setupAngularContentObserver() {
+        let layoutAdjusted = false; // Prevent infinite loop
+        let initialContentLoaded = false;
+        let iframeMonitored = false;
+        
+        const observer = new MutationObserver((mutations) => {
+            let significantContentChanged = false;
+            
+            // Only trigger on significant content changes, not style changes
+            for (const mutation of mutations) {
+                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                    // Check if meaningful text content was added (not just our own modifications)
+                    for (const node of mutation.addedNodes) {
+                        // Skip if this is our own sidebar
+                        if (node.id === 'translator-sidebar' || node.id === 'translator-sidebar-container') {
+                            continue;
+                        }
+                        
+                        // Check for EPUB iframe content
+                        if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'IFRAME' && 
+                            (node.src.includes('xhtml') || node.src.includes('component') || node.src.includes('OEBPS') || node.src.includes('nubereader'))) {
+                            console.log("📖 EPUB iframe detected:", node.src);
+                            setupIframeMonitoring(node);
+                            significantContentChanged = true;
+                            break;
+                        }
+                        
+                        // Look for text content that indicates reader content
+                        if (node.nodeType === Node.TEXT_NODE && node.textContent.trim().length > 20) {
+                            significantContentChanged = true;
+                            break;
+                        } else if (node.nodeType === Node.ELEMENT_NODE) {
+                            // Check if this element contains substantial text content
+                            const textContent = node.textContent || '';
+                            if (textContent.trim().length > 50 && 
+                                !node.classList.contains('translator-') && // Skip our own elements
+                                !node.style.marginRight) { // Skip elements we've already modified
+                                significantContentChanged = true;
+                                break;
+                            }
+                            
+                            // Check for iframes within this element
+                            const iframes = node.querySelectorAll('iframe[src*="xhtml"], iframe[src*="component"], iframe[src*="OEBPS"], iframe[src*="nubereader"]');
+                            if (iframes.length > 0 && !iframeMonitored) {
+                                console.log("📖 Found EPUB iframes in element:", iframes.length);
+                                iframes.forEach(iframe => setupIframeMonitoring(iframe));
+                                iframeMonitored = true;
+                                significantContentChanged = true;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if (significantContentChanged && !layoutAdjusted) {
+                console.log("📖 Significant reader content detected, setting up extension");
+                layoutAdjusted = true;
+                
+                // Wait a bit for Angular to finish loading content
+                setTimeout(() => {
+                    // Set up selection handlers if needed and sidebar is enabled
+                    if (sidebarEnabled && !hasSelectionHandlers) {
+                        console.log("🎯 Setting up selection handlers for Angular content");
+                        setupSelectionHandlers();
+                    }
+                    
+                    // Adjust layout if sidebar is visible
+                    if (sidebarEnabled && sidebarVisible) {
+                        adjustPageLayoutForReader();
+                    }
+                    
+                    // Also monitor existing iframes
+                    monitorExistingIframes();
+                    
+                    initialContentLoaded = true;
+                }, 1000);
+            }
+        });
+        
+        // Observe only specific changes to avoid infinite loops
+        observer.observe(document.body, { 
+            childList: true, 
+            subtree: true
+            // Removed characterData: true to reduce noise
+        });
+        
+        // Set a timeout to enable layout adjustments again if needed
+        setTimeout(() => {
+            if (!initialContentLoaded) {
+                console.log("📚 Angular content loading timeout, enabling layout adjustments");
+                layoutAdjusted = false;
+            }
+        }, 10000);
+    }
+    
+    // Monitor existing EPUB iframes
+    function monitorExistingIframes() {
+        console.log("🔍 === IFRAME DETECTION DEBUG START ===");
+        console.log("🔍 Document readyState:", document.readyState);
+        console.log("🔍 Document URL:", window.location.href);
+        
+        // Try multiple iframe selectors
+        const selectors = [
+            'iframe[src*="xhtml"]',
+            'iframe[src*="component"]', 
+            'iframe[src*="epub"]',
+            'iframe[src*="OEBPS"]',
+            'iframe[src^="/nubereader"]',  // Relative URLs starting with /nubereader
+            'iframe[src*="nubereader"]',   // Any URL containing nubereader
+            'iframe#epubContentIframe',    // Target by ID
+            'iframe[id*="epub"]',          // IDs containing epub
+            'iframe[id*="content"]',       // IDs containing content
+            'iframe',  // All iframes
+        ];
+        
+        selectors.forEach(selector => {
+            const iframes = document.querySelectorAll(selector);
+            console.log(`🔍 Selector "${selector}" found:`, iframes.length, 'iframes');
+            
+            iframes.forEach((iframe, index) => {
+                console.log(`🔍 Iframe ${index}:`, {
+                    src: iframe.src,
+                    id: iframe.id,
+                    className: iframe.className,
+                    offsetParent: iframe.offsetParent,
+                    style_display: iframe.style.display,
+                    computed_display: window.getComputedStyle(iframe).display
+                });
+            });
+        });
+        
+        // Check all elements that might contain iframes
+        const containers = document.querySelectorAll('div, section, article, [ng-view]');
+        console.log("🔍 Checking", containers.length, "potential iframe containers");
+        
+        let foundInContainers = 0;
+        containers.forEach((container, index) => {
+            const iframes = container.querySelectorAll('iframe');
+            if (iframes.length > 0) {
+                foundInContainers += iframes.length;
+                console.log(`🔍 Container ${index} (${container.tagName}.${container.className}) has ${iframes.length} iframes`);
+                iframes.forEach((iframe, iIndex) => {
+                    console.log(`🔍   Iframe ${iIndex} src:`, iframe.src);
+                });
+            }
+        });
+        
+        console.log("🔍 Total iframes found in containers:", foundInContainers);
+        
+        // Log all script tags and their content to see if iframe creation is happening via JS
+        const scripts = document.querySelectorAll('script');
+        console.log("🔍 Found", scripts.length, "script tags");
+        scripts.forEach((script, index) => {
+            if (script.textContent.includes('iframe') || script.textContent.includes('xhtml')) {
+                console.log(`🔍 Script ${index} contains iframe references:`, script.textContent.substring(0, 200));
+            }
+        });
+        
+        console.log("🔍 === IFRAME DETECTION DEBUG END ===");
+        
+        // Setup periodic checking
+        let checkCount = 0;
+        const maxChecks = 10;
+        const checkInterval = setInterval(() => {
+            checkCount++;
+            console.log(`🔍 Periodic iframe check #${checkCount}`);
+            
+            const allIframes = document.querySelectorAll('iframe');
+            console.log(`🔍 Found ${allIframes.length} total iframes on check #${checkCount}`);
+            
+            allIframes.forEach((iframe, index) => {
+                if (!iframe.dataset.translatorChecked) {
+                    iframe.dataset.translatorChecked = 'true';
+                    console.log(`🔍 NEW iframe found:`, {
+                        index,
+                        src: iframe.src,
+                        id: iframe.id,
+                        className: iframe.className
+                    });
+                    
+                    // Enhanced detection for EPUB iframes
+                    const isEpubIframe = 
+                        (iframe.src && (iframe.src.includes('xhtml') || iframe.src.includes('component') || iframe.src.includes('OEBPS') || iframe.src.includes('nubereader'))) ||
+                        (iframe.id && (iframe.id.includes('epub') || iframe.id.includes('content') || iframe.id === 'epubContentIframe')) ||
+                        (!iframe.src && iframe.id); // Empty src with ID likely means dynamic content loading
+                    
+                    if (isEpubIframe) {
+                        console.log("🎯 EPUB iframe detected during periodic check!");
+                        setupIframeMonitoring(iframe);
+                    }
+                }
+            });
+            
+            if (checkCount >= maxChecks) {
+                clearInterval(checkInterval);
+                console.log("🔍 Periodic iframe checking completed");
+            }
+        }, 1000);
+        
+        // Enhanced EPUB iframe detection - include ID-based selectors
+        const iframes = document.querySelectorAll(`
+            iframe[src*="xhtml"], 
+            iframe[src*="component"], 
+            iframe[src*="epub"], 
+            iframe[src*="OEBPS"], 
+            iframe[src*="nubereader"],
+            iframe#epubContentIframe,
+            iframe[id*="epub"],
+            iframe[id*="content"]
+        `);
+        console.log("🔍 Found existing EPUB iframes:", iframes.length);
+        
+        iframes.forEach(iframe => {
+            setupIframeMonitoring(iframe);
+        });
+        
+        // Also check for iframes without src that might be content iframes
+        const emptySrcIframes = document.querySelectorAll('iframe:not([src]), iframe[src=""]');
+        console.log("🔍 Found iframes with empty src:", emptySrcIframes.length);
+        
+        emptySrcIframes.forEach(iframe => {
+            if (iframe.id && (iframe.id.includes('epub') || iframe.id.includes('content') || iframe.id === 'epubContentIframe')) {
+                console.log("🎯 Empty src EPUB iframe detected:", iframe.id);
+                setupIframeMonitoring(iframe);
+            }
+        });
+        
+        // Also monitor for dynamically created iframes
+        setTimeout(() => {
+            const newIframes = document.querySelectorAll(`
+                iframe[src*="xhtml"], 
+                iframe[src*="component"], 
+                iframe[src*="epub"], 
+                iframe[src*="OEBPS"], 
+                iframe[src*="nubereader"],
+                iframe#epubContentIframe,
+                iframe[id*="epub"],
+                iframe[id*="content"]
+            `);
+            newIframes.forEach(iframe => {
+                if (!iframe.dataset.translatorMonitored) {
+                    setupIframeMonitoring(iframe);
+                }
+            });
+        }, 2000);
+    }
+
+    // Setup monitoring for EPUB iframe content
+    function setupIframeMonitoring(iframe) {
+        if (iframe.dataset.translatorMonitored) {
+            return; // Already monitoring this iframe
+        }
+        
+        iframe.dataset.translatorMonitored = 'true';
+        console.log("🔧 Setting up iframe monitoring for:", iframe.src || iframe.id || 'unnamed iframe');
+        
+        // Function to try accessing iframe content
+        function tryAccessIframeContent() {
+            try {
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                if (iframeDoc && iframeDoc.body) {
+                    console.log("✅ Successfully accessed iframe content");
+                    
+                    // Override selection blocking in iframe
+                    const style = iframeDoc.createElement('style');
+                    style.textContent = `
+                        * {
+                            -webkit-user-select: text !important;
+                            -moz-user-select: text !important;
+                            user-select: text !important;
+                            -webkit-touch-callout: default !important;
+                        }
+                        body, div, p, span {
+                            pointer-events: auto !important;
+                            -webkit-user-select: text !important;
+                            -moz-user-select: text !important;
+                            user-select: text !important;
+                        }
+                    `;
+                    iframeDoc.head.appendChild(style);
+                    
+                    // Add selection handlers to iframe
+                    setupIframeSelectionHandlers(iframeDoc, iframe);
+                    
+                    return true;
+                } else {
+                    console.log("⚠️ Cannot access iframe content (cross-origin or not loaded)");
+                    return false;
+                }
+            } catch (error) {
+                console.log("⚠️ Iframe access error:", error.message);
+                return false;
+            }
+        }
+        
+        // Try to access iframe content when loaded
+        iframe.addEventListener('load', () => {
+            console.log("🔄 Iframe load event fired");
+            setTimeout(() => {
+                if (!tryAccessIframeContent()) {
+                    setupAggressiveSelectionMonitoring();
+                }
+            }, 100);
+        });
+        
+        // For iframes with empty src, set up MutationObserver to watch for content changes
+        if (!iframe.src || iframe.src === '') {
+            console.log("📝 Setting up MutationObserver for empty src iframe:", iframe.id);
+            
+            // Check periodically if content gets loaded
+            let retryCount = 0;
+            const maxRetries = 20;
+            const retryInterval = setInterval(() => {
+                retryCount++;
+                console.log(`🔄 Retry ${retryCount}: Checking if iframe content is loaded`);
+                
+                if (tryAccessIframeContent()) {
+                    clearInterval(retryInterval);
+                    console.log("✅ Iframe content successfully loaded and monitored");
+                } else if (retryCount >= maxRetries) {
+                    clearInterval(retryInterval);
+                    console.log("⚠️ Max retries reached, falling back to aggressive monitoring");
+                    setupAggressiveSelectionMonitoring();
+                }
+            }, 500);
+        }
+        
+        // If iframe is already loaded
+        if (iframe.contentDocument) {
+            iframe.dispatchEvent(new Event('load'));
+        }
+    }
+
+    // Setup selection handlers specifically for iframe content
+    function setupIframeSelectionHandlers(iframeDoc, iframe) {
+        console.log("🎯 Setting up iframe selection handlers");
+        
+        // Enhanced selection monitoring for iframe
+        iframeDoc.addEventListener('selectionchange', () => {
+            if (!sidebarEnabled) return;
+            
+            const selection = iframeDoc.getSelection();
+            const currentSelection = selection.toString().trim();
+            
+            if (currentSelection && currentSelection.length > 0) {
+                console.log("📝 Iframe selection detected:", currentSelection.substring(0, 30) + "...");
+                
+                // Process the selection
+                setTimeout(() => {
+                    if (selection && currentSelection && 
+                        selection.rangeCount > 0 && 
+                        !selection.isCollapsed &&
+                        currentSelection !== lastProcessedSelection) {
+                        
+                        console.log("✅ Processing iframe selection");
+                        processSelection(selection);
+                        lastProcessedSelection = currentSelection;
+                    }
+                }, 100);
+            }
+        });
+        
+        // Mouse events on iframe
+        iframeDoc.addEventListener('mouseup', () => {
+            if (!sidebarEnabled) return;
+            
+            setTimeout(() => {
+                const selection = iframeDoc.getSelection();
+                const currentSelection = selection.toString().trim();
+                
+                if (selection && currentSelection && 
+                    selection.rangeCount > 0 && 
+                    !selection.isCollapsed &&
+                    currentSelection !== lastProcessedSelection) {
+                    
+                    console.log("✅ Processing iframe mouse selection");
+                    processSelection(selection);
+                    lastProcessedSelection = currentSelection;
+                }
+            }, 150);
+        });
+    }
+
+    // Aggressive selection monitoring as fallback
+    function setupAggressiveSelectionMonitoring() {
+        console.log("🚀 Setting up aggressive selection monitoring");
+        
+        // Monitor clipboard events as fallback
+        document.addEventListener('copy', (event) => {
+            console.log("📋 Copy event detected!");
+            if (!sidebarEnabled) {
+                console.log("📋 Copy event: sidebar not enabled");
+                return;
+            }
+            
+            const selection = window.getSelection();
+            const selectedText = selection.toString().trim();
+            
+            console.log("📋 Copy event selection:", {
+                hasSelection: !!selectedText,
+                length: selectedText.length,
+                text: selectedText.substring(0, 50) + "...",
+                rangeCount: selection.rangeCount
+            });
+            
+            if (selectedText && selectedText !== lastProcessedSelection) {
+                console.log("📋 Copy event detected, processing selection");
+                processSelection(selection);
+                lastProcessedSelection = selectedText;
+            }
+        });
+        
+        // Monitor keyboard shortcuts that might indicate selection
+        document.addEventListener('keydown', (event) => {
+            if (!sidebarEnabled) return;
+            
+            // Ctrl+C or Ctrl+A
+            if (event.ctrlKey && (event.key === 'c' || event.key === 'a')) {
+                console.log("⌨️ Keyboard shortcut detected:", event.key);
+                setTimeout(() => {
+                    const selection = window.getSelection();
+                    const selectedText = selection.toString().trim();
+                    
+                    console.log("⌨️ Keyboard shortcut selection check:", {
+                        key: event.key,
+                        hasSelection: !!selectedText,
+                        length: selectedText.length,
+                        text: selectedText.substring(0, 30) + "...",
+                        rangeCount: selection.rangeCount
+                    });
+                    
+                    if (selectedText && selectedText !== lastProcessedSelection) {
+                        console.log("⌨️ Keyboard shortcut selection detected");
+                        processSelection(selection);
+                        lastProcessedSelection = selectedText;
+                    }
+                }, 100);
+            }
+        });
+        
+        // Periodic selection check as ultimate fallback
+        let selectionCheckInterval = setInterval(() => {
+            if (!sidebarEnabled) {
+                clearInterval(selectionCheckInterval);
+                return;
+            }
+            
+            const selection = window.getSelection();
+            const selectedText = selection.toString().trim();
+            
+            if (selectedText && selectedText.length > 2 && selectedText !== lastProcessedSelection) {
+                console.log("🔄 Periodic check found selection:", {
+                    length: selectedText.length,
+                    text: selectedText.substring(0, 30) + "...",
+                    rangeCount: selection.rangeCount,
+                    isCollapsed: selection.isCollapsed
+                });
+                processSelection(selection);
+                lastProcessedSelection = selectedText;
+            } else if (selectedText && selectedText.length > 2) {
+                // Debug: selection exists but already processed
+                console.log("🔄 Periodic check: selection exists but already processed:", selectedText.substring(0, 20) + "...");
+            } else if (!selectedText) {
+                // Debug: no selection found
+                console.log("🔄 Periodic check: no selection found");
+            }
+        }, 2000); // Check every 2 seconds
+        
+        console.log("🚀 Aggressive selection monitoring setup complete");
+    }
+    
+    // Enhanced page layout adjustment for readers
+    function adjustPageLayoutForReader() {
+        console.log("🎨 Adjusting page layout for reader");
+        
+        // Prevent recursive calls
+        if (document.body.dataset.translatorLayoutAdjusted === 'true') {
+            console.log("⚠️ Layout already adjusted, skipping");
+            return;
+        }
+        
+        // Create a CSS style element for more reliable styling
+        let styleElement = document.getElementById('translator-layout-styles');
+        if (!styleElement) {
+            styleElement = document.createElement('style');
+            styleElement.id = 'translator-layout-styles';
+            document.head.appendChild(styleElement);
+        }
+        
+        // CSS rules that will override Angular's styles
+        const cssRules = `
+            /* Main content containers */
+            [ng-view] {
+                margin-right: 320px !important;
+                max-width: calc(100vw - 340px) !important;
+                transition: margin-right 0.3s ease, max-width 0.3s ease !important;
+            }
+            
+            /* Additional selectors for common reader layouts */
+            .content,
+            #content,
+            main,
+            .main-content,
+            .page-content,
+            .reader-content {
+                margin-right: 320px !important;
+                max-width: calc(100vw - 340px) !important;
+                transition: margin-right 0.3s ease, max-width 0.3s ease !important;
+            }
+            
+            /* Ensure body doesn't get too narrow */
+            body {
+                margin-right: 0 !important;
+                transition: all 0.3s ease !important;
+            }
+            
+            /* Handle any iframe content */
+            iframe[src*="xhtml"] {
+                margin-right: 0 !important;
+                max-width: 100% !important;
+            }
+            
+            /* Override text selection blocking */
+            * {
+                -webkit-user-select: text !important;
+                -moz-user-select: text !important;
+                -ms-user-select: text !important;
+                user-select: text !important;
+                -webkit-touch-callout: default !important;
+                -webkit-tap-highlight-color: rgba(0,0,0,0) !important;
+            }
+            
+            /* Re-enable context menu and copy */
+            body, div, p, span, iframe {
+                pointer-events: auto !important;
+                -webkit-user-select: text !important;
+                -moz-user-select: text !important;
+                user-select: text !important;
+            }
+            
+            /* Ensure the translator sidebar has proper styling */
+            #translator-sidebar,
+            #translator-sidebar-container {
+                position: fixed !important;
+                right: 0 !important;
+                top: 0 !important;
+                width: 300px !important;
+                height: 100vh !important;
+                z-index: 2147483647 !important;
+                background: white !important;
+                box-shadow: -2px 0 5px rgba(0, 0, 0, 0.2) !important;
+                border: none !important;
+            }
+        `;
+        
+        styleElement.textContent = cssRules;
+        console.log("✅ Applied CSS-based layout adjustments");
+        
+        // Try multiple selectors for reader content - but now just for logging
+        const possibleContainers = [
+            '[ng-view]',
+            '.content',
+            '#content',
+            '[class*="reader"]',
+            '[class*="book"]',
+            '[class*="text"]',
+            'main',
+            '.main-content',
+            '.page-content',
+            '.reader-content'
+        ];
+        
+        let contentContainer = null;
+        
+        for (const selector of possibleContainers) {
+            contentContainer = document.querySelector(selector);
+            if (contentContainer && !contentContainer.dataset.translatorModified) {
+                console.log("📍 Found content container:", selector);
+                
+                // Store original styles for restoration and mark as modified
+                if (!contentContainer.dataset.originalMargin) {
+                    contentContainer.dataset.originalMargin = contentContainer.style.marginRight || '';
+                    contentContainer.dataset.originalMaxWidth = contentContainer.style.maxWidth || '';
+                    contentContainer.dataset.originalWidth = contentContainer.style.width || '';
+                }
+                contentContainer.dataset.translatorModified = 'true';
+                break;
+            }
+        }
+        
+        // Also apply inline styles as backup (with !important via style attribute)
+        if (contentContainer) {
+            // Force the styles via setAttribute to ensure they stick
+            const currentStyle = contentContainer.getAttribute('style') || '';
+            const newStyle = currentStyle + 
+                '; margin-right: 320px !important; max-width: calc(100vw - 340px) !important; transition: all 0.3s ease !important;';
+            contentContainer.setAttribute('style', newStyle);
+            console.log("✅ Applied inline style backup to container");
+        }
+        
+        // Mark body as adjusted
+        document.body.dataset.translatorLayoutAdjusted = 'true';
+        console.log("✅ Layout adjustment completed with CSS injection");
+    }
+    
+    // Reset page layout adjustments
+    function resetPageLayoutAdjustments() {
+        console.log("🔄 Resetting page layout");
+        
+        // Remove the CSS style element
+        const styleElement = document.getElementById('translator-layout-styles');
+        if (styleElement) {
+            styleElement.remove();
+            console.log("✅ Removed CSS-based layout styles");
+        }
+        
+        // Reset all possible containers
+        const possibleContainers = [
+            '[ng-view]',
+            '.content',
+            '#content',
+            '[class*="reader"]',
+            '[class*="book"]',
+            '[class*="text"]',
+            'main',
+            '.main-content',
+            '.page-content',
+            '.reader-content'
+        ];
+        
+        possibleContainers.forEach(selector => {
+            const container = document.querySelector(selector);
+            if (container && container.dataset.originalMargin !== undefined) {
+                // Restore original styles
+                container.style.marginRight = container.dataset.originalMargin;
+                container.style.maxWidth = container.dataset.originalMaxWidth;
+                container.style.width = container.dataset.originalWidth;
+                
+                // Clean up any added inline styles
+                const currentStyle = container.getAttribute('style') || '';
+                const cleanedStyle = currentStyle
+                    .replace(/;\s*margin-right:[^;]+!important/g, '')
+                    .replace(/;\s*max-width:[^;]+!important/g, '')
+                    .replace(/;\s*transition:[^;]+!important/g, '');
+                
+                if (cleanedStyle.trim()) {
+                    container.setAttribute('style', cleanedStyle);
+                } else {
+                    container.removeAttribute('style');
+                }
+                
+                // Clean up data attributes
+                delete container.dataset.originalMargin;
+                delete container.dataset.originalMaxWidth;
+                delete container.dataset.originalWidth;
+                delete container.dataset.translatorModified;
+                
+                console.log("✅ Reset container:", selector);
+            }
+        });
+        
+        // Reset body
+        if (document.body.dataset.originalMargin !== undefined) {
+            document.body.style.marginRight = document.body.dataset.originalMargin;
+            delete document.body.dataset.originalMargin;
+        }
+        
+        // Remove layout adjustment flag
+        delete document.body.dataset.translatorLayoutAdjusted;
+        console.log("✅ Page layout reset completed");
+    }
+    
+    // Setup selection event handlers
+    function setupSelectionHandlers() {
+        if (hasSelectionHandlers) {
+            console.log("⚠️ Selection handlers already set up");
+            return;
+        }
+        
+        console.log("🎯 Setting up enhanced selection handlers for Angular");
+        
+        // Enhanced selection change handler
+        const enhancedSelectionChange = debounce(() => {
+            if (!sidebarEnabled) return;
+            
+            const selection = window.getSelection();
+            const currentSelection = selection.toString().trim();
+            
+            if (currentSelection && currentSelection.length > 0 && !isMouseDown) {
+                console.log("📝 Selection detected:", currentSelection.substring(0, 30) + "...");
+                lastSelection = currentSelection;
+            }
+        }, 100);
+        
+        // Listen for selection changes with debouncing
+        document.addEventListener("selectionchange", enhancedSelectionChange);
+        
+        // Enhanced mouse handling for Angular apps
+        let mouseDownTime = 0;
+        
+        document.addEventListener("mousedown", (event) => {
+            mouseDownTime = Date.now();
+            if (selectionTimeout) {
+                clearTimeout(selectionTimeout);
+            }
+            isSelecting = false;
+            isMouseDown = true;
+            console.log("🖱️ Mouse down detected");
+        });
+        
+        // Enhanced mouse up with better timing for Angular
+        document.addEventListener("mouseup", (event) => {
+            const mouseUpTime = Date.now();
+            const selectionDuration = mouseUpTime - mouseDownTime;
+            
+            isMouseDown = false;
+            
+            if (!sidebarEnabled) {
+                console.log("⚠️ Sidebar not enabled, skipping mouseup processing");
+                return;
+            }
+            
+            // Longer delay for Angular apps to ensure selection is stable
+            setTimeout(() => {
+                const selection = window.getSelection();
+                const currentSelection = selection.toString().trim();
+                
+                console.log("🖱️ Mouse up analysis:", { 
+                    hasSelection: !!currentSelection,
+                    selectionLength: currentSelection.length,
+                    duration: selectionDuration,
+                    rangeCount: selection.rangeCount,
+                    isCollapsed: selection.isCollapsed,
+                    text: currentSelection.substring(0, 50) + "..."
+                });
+                
+                // Process selection with additional validation for Angular
+                if (selection && currentSelection && 
+                    selection.rangeCount > 0 && 
+                    !selection.isCollapsed &&
+                    currentSelection !== lastProcessedSelection &&
+                    currentSelection.length >= 2 && // Minimum length
+                    selectionDuration > 50) { // Must be intentional selection
+                    
+                    console.log("✅ Processing valid Angular selection:", currentSelection.substring(0, 50) + "...");
+                    processSelection(selection);
+                    lastProcessedSelection = currentSelection;
+                    lastSelection = currentSelection;
+                }
+            }, 150); // Longer delay for Angular apps
+        });
+        
+        // Enhanced keyboard selection for Angular
+        document.addEventListener("keyup", (event) => {
+            if (!sidebarEnabled) return;
+            
+            // More comprehensive key detection for Angular apps
+            const selectionKeys = [
+                "Shift", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
+                "Home", "End", "PageUp", "PageDown"
+            ];
+            
+            const isSelectionKey = selectionKeys.includes(event.key) || 
+                                 (event.ctrlKey && event.key === "a") ||
+                                 (event.ctrlKey && event.key === "A");
+            
+            if (isSelectionKey) {
+                // Longer timeout for Angular apps
+                setTimeout(() => {
+                    const selection = window.getSelection();
+                    const currentSelection = selection.toString().trim();
+                    
+                    console.log("⌨️ Keyboard selection check:", { 
+                        key: event.key,
+                        hasSelection: !!currentSelection,
+                        selectionLength: currentSelection.length,
+                        text: currentSelection.substring(0, 30) + "..."
+                    });
+                    
+                    if (selection && currentSelection && 
+                        selection.rangeCount > 0 && 
+                        !selection.isCollapsed &&
+                        currentSelection !== lastProcessedSelection &&
+                        !isMouseDown) {
+                        
+                        console.log("✅ Processing keyboard selection in Angular");
+                        processSelection(selection);
+                        lastProcessedSelection = currentSelection;
+                    }
+                }, 300); // Even longer delay for keyboard in Angular
+            }
+        });
+        
+        // Add double-click handler for quick word selection in Angular
+        document.addEventListener("dblclick", (event) => {
+            if (!sidebarEnabled) return;
+            
+            setTimeout(() => {
+                const selection = window.getSelection();
+                const currentSelection = selection.toString().trim();
+                
+                if (selection && currentSelection && 
+                    selection.rangeCount > 0 && 
+                    !selection.isCollapsed &&
+                    currentSelection !== lastProcessedSelection) {
+                    
+                    console.log("🖱️ Processing double-click selection in Angular");
+                    processSelection(selection);
+                    lastProcessedSelection = currentSelection;
+                }
+            }, 100);
+        });
+        
+        hasSelectionHandlers = true;
+        console.log("✅ Enhanced selection handlers set up successfully for Angular");
+    }
+    
     // Listen for messages from background script with improved error handling
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.log("Content script received message:", message);
@@ -163,12 +1045,11 @@ if (window.translatorExtensionLoaded) {
         }
     });
     
-    // Handle sidebar toggling logic
+    // Update the sidebar toggle handler
     function handleSidebarToggle() {
         if (sidebarEnabled) {
             if (!document.getElementById("translator-sidebar") && !document.getElementById("translator-sidebar-container")) {
                 if (isEdgeImmersiveMode) {
-                    // Try alternative approach first for immersive mode
                     createImmersiveModeIframe();
                 } else {
                     createSidebar();
@@ -178,39 +1059,41 @@ if (window.translatorExtensionLoaded) {
                 showSidebar();
             }
             
-            // Apply different adjustments based on mode
+            // Apply appropriate layout adjustments
             if (isEdgeImmersiveMode) {
                 adjustPageForImmersiveMode();
             } else {
-                // Regular adjustment
-                document.body.style.marginRight = "300px";
+                adjustPageLayoutForReader();
+            }
+            
+            // Set up selection handlers if not already done
+            if (!hasSelectionHandlers) {
+                setupSelectionHandlers();
             }
         } else {
             hideSidebar();
             
-            // Reset based on mode
             if (isEdgeImmersiveMode) {
                 resetImmersiveModeAdjustments();
             } else {
-                // Regular reset
-                document.body.style.marginRight = "0";
+                resetPageLayoutAdjustments();
             }
         }
     }
     
     // Function to create sidebar
-function createSidebar() {
-    const sidebar = document.createElement("iframe");
-    sidebar.id = "translator-sidebar";
-    sidebar.src = chrome.runtime.getURL("sidebar.html");
-    sidebar.style.position = "fixed";
-    sidebar.style.right = "0";
-    sidebar.style.top = "0";
-    sidebar.style.width = "300px";
-    sidebar.style.height = "100vh";
-    sidebar.style.border = "none";
+    function createSidebar() {
+        const sidebar = document.createElement("iframe");
+        sidebar.id = "translator-sidebar";
+        sidebar.src = chrome.runtime.getURL("sidebar.html");
+        sidebar.style.position = "fixed";
+        sidebar.style.right = "0";
+        sidebar.style.top = "0";
+        sidebar.style.width = "300px";
+        sidebar.style.height = "100vh";
+        sidebar.style.border = "none";
         sidebar.style.zIndex = "99999"; // Higher z-index to ensure it's visible
-    sidebar.style.background = "white";
+        sidebar.style.background = "white";
         sidebar.style.boxShadow = "-2px 0 5px rgba(0, 0, 0, 0.2)";
         sidebar.style.transition = "transform 0.3s ease-in-out";
         
@@ -227,7 +1110,7 @@ function createSidebar() {
             sidebar.classList.add('translator-immersive-mode');
         }
 
-    document.body.appendChild(sidebar);
+        document.body.appendChild(sidebar);
         
         // For Edge immersive reader, we need to ensure the iframe loads properly
         if (isEdgeImmersiveMode) {
@@ -415,13 +1298,6 @@ function createSidebar() {
         };
     }
 
-    // Variables to track selection state
-    let selectionTimeout;
-    let lastSelection = "";
-    let isSelecting = false;
-    let lastProcessedSelection = "";
-    let isMouseDown = false;
-
     // Handle text selection changes - this fires during selection (for monitoring only)
     function handleSelectionChange() {
         if (!sidebarEnabled) return;
@@ -543,7 +1419,7 @@ function createSidebar() {
             if (isEdgeImmersiveMode) {
                 adjustPageForImmersiveMode();
             } else {
-                document.body.style.marginRight = "300px";
+                adjustPageLayoutForReader();
             }
         }
         
