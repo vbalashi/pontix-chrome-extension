@@ -262,9 +262,59 @@ body {
 }
 
 .settings-content {
-    flex-grow: 1;
-    padding: 15px;
+    padding: 0 20px 20px;
+    max-height: calc(100vh - 100px);
     overflow-y: auto;
+}
+
+.general-settings-section {
+    margin-bottom: 25px;
+}
+
+.general-settings-section h3 {
+    margin-bottom: 15px;
+    color: #3c4043;
+    font-size: 16px;
+    font-weight: 500;
+}
+
+.setting-row {
+    margin-bottom: 15px;
+}
+
+.setting-row label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #5f6368;
+}
+
+.number-input-container {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.number-input-container input[type="number"] {
+    width: 80px;
+    padding: 8px 12px;
+    border: 1px solid #dadce0;
+    border-radius: 4px;
+    font-size: 14px;
+    color: #3c4043;
+}
+
+.number-input-container input[type="number"]:focus {
+    outline: none;
+    border-color: #1a73e8;
+    box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.2);
+}
+
+.input-help {
+    font-size: 12px;
+    color: #5f6368;
+    font-style: italic;
 }
 
 .provider-settings-section h3 {

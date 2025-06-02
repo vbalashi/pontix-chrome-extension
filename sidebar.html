@@ -77,6 +77,17 @@
             <button id="close-settings">×</button>
         </div>
         <div class="settings-content">
+            <div class="general-settings-section">
+                <h3>General Settings</h3>
+                <div class="setting-row">
+                    <label for="max-word-count">Maximum words to translate:</label>
+                    <div class="number-input-container">
+                        <input type="number" id="max-word-count" min="1" max="100" value="25" step="1">
+                        <span class="input-help">Complete sentences are always allowed regardless of word count</span>
+                    </div>
+                </div>
+            </div>
+            
             <div class="provider-settings-section">
                 <h3>Translation Services</h3>
                 <div class="provider-setting" data-provider="google">

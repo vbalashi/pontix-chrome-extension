@@ -10,6 +10,7 @@ const saveSettingsButton = document.getElementById("save-settings");
 
 // Default settings
 let settings = {
+    maxWordCount: 25, // Default maximum word count for translation
     enabledProviders: {
         google: true,
         deepl: false,
@@ -211,6 +212,12 @@ function restoreTranslationBoxes() {
 
 // Update settings UI
 function updateSettingsUI() {
+    // Update word count setting
+    const maxWordCountInput = document.getElementById('max-word-count');
+    if (maxWordCountInput) {
+        maxWordCountInput.value = settings.maxWordCount || 25;
+    }
+    
     // Update checkboxes
     for (const provider in settings.enabledProviders) {
         const checkbox = document.getElementById(`enable-${provider}`);
@@ -274,6 +281,12 @@ function setupEventListeners() {
     
     // Save settings button
     saveSettingsButton.addEventListener("click", () => {
+        // Save word count setting
+        const maxWordCountInput = document.getElementById('max-word-count');
+        if (maxWordCountInput) {
+            settings.maxWordCount = parseInt(maxWordCountInput.value) || 25;
+        }
+        
         // Save enabled status for each provider
         for (const provider in settings.enabledProviders) {
             const checkbox = document.getElementById(`enable-${provider}`);
@@ -295,6 +308,16 @@ function setupEventListeners() {
         
         // Refresh translation boxes based on new settings
         refreshTranslationBoxes();
+        
+        // Send updated settings to content script
+        chrome.tabs && chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+            if (tabs[0]) {
+                chrome.tabs.sendMessage(tabs[0].id, {
+                    action: "updateSettings",
+                    settings: { maxWordCount: settings.maxWordCount }
+                });
+            }
+        });
     });
     
     // Set up delegates for dynamic elements

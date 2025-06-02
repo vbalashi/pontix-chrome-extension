@@ -4,6 +4,12 @@ if (window.translatorExtensionLoaded) {
 } else {
     window.translatorExtensionLoaded = true;
     
+    // Version identification for debugging
+    console.log("🔄 Translator Extension v4.0 - Configurable Word Limits Loaded");
+    console.log("🐛 Debug mode enabled - selection events will be logged");
+    console.log("⏰ New behavior: Waits for mouse release/keyboard completion before processing");
+    console.log("📊 New feature: Configurable word count limits in settings");
+    
     // Track sidebar state
     let sidebarEnabled = false;
     let sidebarVisible = false;
@@ -29,6 +35,9 @@ if (window.translatorExtensionLoaded) {
     function initializeExtension() {
         isEdgeImmersiveMode = checkEdgeImmersiveMode();
         
+        // Load settings from storage
+        loadExtensionSettings();
+        
         // If in immersive mode, we need a different approach
         if (isEdgeImmersiveMode) {
             console.log("Edge immersive reader mode detected");
@@ -48,6 +57,22 @@ if (window.translatorExtensionLoaded) {
             chrome.runtime.sendMessage({ action: "contentScriptLoaded", isImmersiveMode: isEdgeImmersiveMode });
         } catch (e) {
             console.log("Error sending contentScriptLoaded message:", e);
+        }
+    }
+    
+    // Load extension settings from storage
+    function loadExtensionSettings() {
+        try {
+            chrome.storage.sync.get("translatorSettings", (result) => {
+                if (result.translatorSettings && result.translatorSettings.maxWordCount) {
+                    maxWordCount = result.translatorSettings.maxWordCount;
+                    console.log("📋 Loaded maxWordCount setting:", maxWordCount);
+                } else {
+                    console.log("📋 Using default maxWordCount:", maxWordCount);
+                }
+            });
+        } catch (e) {
+            console.log("Error loading settings:", e);
         }
     }
     
@@ -121,6 +146,15 @@ if (window.translatorExtensionLoaded) {
             // Send a response to let the background script know the message was received
             sendResponse({ success: true });
             return true; // Keep the message channel open for async response
+        }
+        
+        if (message.action === "updateSettings") {
+            if (message.settings && message.settings.maxWordCount) {
+                maxWordCount = message.settings.maxWordCount;
+                console.log("📋 Updated maxWordCount setting from sidebar:", maxWordCount);
+            }
+            sendResponse({ success: true });
+            return true;
         }
     });
     
@@ -350,7 +384,7 @@ function updateSidebar(word, sentence, selectedText = "") {
         }
     }
     
-    // Debounce function to avoid too many selection updates
+    // Debounce function to avoid too many rapid events
     function debounce(func, wait) {
         let timeout;
         return function() {
@@ -368,15 +402,17 @@ function updateSidebar(word, sentence, selectedText = "") {
     let lastSelection = "";
     let isSelecting = false;
     let lastProcessedSelection = "";
+    let isMouseDown = false;
+    let maxWordCount = 25; // Default, will be loaded from settings
 
-    // Handle text selection changes - this fires during selection
+    // Handle text selection changes - this fires during selection (for monitoring only)
     function handleSelectionChange() {
         if (!sidebarEnabled) return;
         
         const selection = window.getSelection();
         const currentSelection = selection.toString().trim();
         
-        // Clear any existing timeout
+        // Clear any existing timeout to prevent premature processing
         if (selectionTimeout) {
             clearTimeout(selectionTimeout);
         }
@@ -388,20 +424,33 @@ function updateSidebar(word, sentence, selectedText = "") {
             return;
         }
         
-        // If selection changed, we're still selecting
-        if (currentSelection !== lastSelection) {
-            isSelecting = true;
-            lastSelection = currentSelection;
-            
-            // Set a timeout to process the selection after user stops changing it
+        // Just track the selection state, don't process yet
+        lastSelection = currentSelection;
+        isSelecting = true;
+        
+        // Debug logging (reduced verbosity)
+        console.log("Selection tracking:", { 
+            length: currentSelection.length,
+            rangeCount: selection.rangeCount,
+            isCollapsed: selection.isCollapsed,
+            isMouseDown: isMouseDown
+        });
+        
+        // Only set a timeout if mouse is not down (keyboard selection)
+        // and only as a fallback for keyboard selections that don't trigger keyup
+        if (!isMouseDown) {
             selectionTimeout = setTimeout(() => {
-                // Only process if this selection is different from the last processed one
-                if (currentSelection !== lastProcessedSelection) {
-                    processSelection(selection);
-                    lastProcessedSelection = currentSelection;
+                // Only process if we're not actively mouse selecting and have a valid selection
+                if (!isMouseDown && currentSelection && currentSelection !== lastProcessedSelection) {
+                    console.log("⌨️ Processing keyboard selection after timeout");
+                    const freshSelection = window.getSelection();
+                    if (freshSelection && freshSelection.toString().trim() === currentSelection) {
+                        processSelection(freshSelection);
+                        lastProcessedSelection = currentSelection;
+                    }
                 }
                 isSelecting = false;
-            }, 500); // Wait 500ms after selection stops changing
+            }, 1000); // Longer timeout for keyboard-only selections
         }
     }
 
@@ -409,16 +458,47 @@ function updateSidebar(word, sentence, selectedText = "") {
     function processSelection(selection) {
         if (!selection || selection.toString().trim() === "") return;
         
+        const selectedText = selection.toString().trim();
+        
+        // Prevent duplicate processing if the same text was just processed
+        if (selectedText === lastProcessedSelection) {
+            console.log("🚫 Skipping duplicate selection processing");
+            return;
+        }
+        
+        console.log("✅ Processing new selection:", selectedText.substring(0, 50) + "...");
+
         // Get the selected word and clean it to avoid punctuation
-        let word = selection.toString().trim();
+        let word = selectedText;
         // Remove trailing punctuation if any
         word = word.replace(/[.,;:!?)"'\]]+$/, '').replace(/^[("'\[]+/, '');
         
-        // Don't process if selection is too long to be a word or short phrase
-        if (word.split(/\s+/).length > 10) return; // Increased limit to allow longer phrases
+        // Check if it's a reasonable length selection
+        const wordCount = word.split(/\s+/).length;
+        const isCompleteSentence = /^[A-Z].*[.!?]$/.test(selectedText.trim());
+        
+        // Allow complete sentences even if longer, but limit very long selections
+        if (wordCount > 100) {
+            console.log("⚠️ Selection extremely long (" + wordCount + " words), skipping");
+            return;
+        }
+        
+        // For non-sentence selections, use the configurable limit
+        if (wordCount > maxWordCount && !isCompleteSentence) {
+            console.log(`⚠️ Selection too long (${wordCount} words) and not a complete sentence. Limit: ${maxWordCount} words. Skipping.`);
+            return;
+        }
+        
+        console.log("📏 Selection length check passed:", {
+            wordCount: wordCount,
+            maxWordCount: maxWordCount,
+            isCompleteSentence: isCompleteSentence,
+            decision: wordCount <= maxWordCount ? "within limit" : "complete sentence allowed"
+        });
         
         // Get just the sentence containing the selection
         const sentence = extractSentence(selection);
+        console.log("📝 Extracted sentence:", sentence.substring(0, 100) + "...");
         
         // Create sidebar if it doesn't exist
         let needsCreation = true;
@@ -430,6 +510,7 @@ function updateSidebar(word, sentence, selectedText = "") {
         }
         
         if (needsCreation) {
+            console.log("🎨 Creating sidebar...");
             if (isEdgeImmersiveMode) {
                 createImmersiveModeIframe();
             } else {
@@ -446,24 +527,108 @@ function updateSidebar(word, sentence, selectedText = "") {
         }
         
         // Send data to sidebar with the selected text
-        updateSidebar(word, sentence, selection.toString().trim());
+        updateSidebar(word, sentence, selectedText);
+        console.log("📤 Sent to sidebar - Word:", word, "Sentence length:", sentence.length);
     }
 
     // Listen for selection changes
     document.addEventListener("selectionchange", handleSelectionChange);
 
-    // Also listen for mouseup as a fallback for immediate single clicks
-    document.addEventListener("mouseup", debounce((event) => {
-        // Only process if we're not in the middle of a selection change
-        if (!isSelecting) {
+    // Track mouse state for better selection handling
+    document.addEventListener("mousedown", (event) => {
+        // Reset selection state when starting a new selection
+        if (selectionTimeout) {
+            clearTimeout(selectionTimeout);
+        }
+        isSelecting = false;
+        isMouseDown = true;
+        console.log("🖱️ Mouse down - starting selection");
+    });
+
+    // Primary trigger for processing selections - when mouse is released
+    document.addEventListener("mouseup", (event) => {
+        isMouseDown = false;
+        
+        if (!sidebarEnabled) {
+            console.log("⚠️ Sidebar not enabled, skipping mouseup processing");
+            return;
+        }
+        
+        // Small delay to ensure selection is finalized
+        setTimeout(() => {
             const selection = window.getSelection();
             const currentSelection = selection.toString().trim();
-            if (selection && currentSelection && currentSelection !== lastProcessedSelection) {
+            
+            console.log("🖱️ Mouse up - checking selection:", { 
+                hasSelection: !!currentSelection,
+                selectionLength: currentSelection.length,
+                rangeCount: selection.rangeCount,
+                isCollapsed: selection.isCollapsed,
+                text: currentSelection.substring(0, 50) + "..."
+            });
+            
+            // Process selection if we have valid content that hasn't been processed
+            if (selection && currentSelection && 
+                selection.rangeCount > 0 && 
+                !selection.isCollapsed &&
+                currentSelection !== lastProcessedSelection) {
+                
+                console.log("✅ Mouse processing selection:", currentSelection.substring(0, 50) + "...");
                 processSelection(selection);
                 lastProcessedSelection = currentSelection;
+                lastSelection = currentSelection;
+            } else if (!currentSelection) {
+                console.log("📝 No selection after mouse up");
+            } else if (currentSelection === lastProcessedSelection) {
+                console.log("🔄 Same selection already processed");
             }
+        }, 50); // Small delay to ensure selection is stable
+    });
+    
+    // Listen for keyboard events that might create selections
+    document.addEventListener("keyup", (event) => {
+        if (!sidebarEnabled) return;
+        
+        // Check for keys that typically end a selection
+        if (event.key === "Shift" || 
+            event.key === "ArrowLeft" || 
+            event.key === "ArrowRight" || 
+            event.key === "ArrowUp" || 
+            event.key === "ArrowDown" ||
+            event.key === "Home" ||
+            event.key === "End" ||
+            (event.ctrlKey && event.key === "a")) {
+            
+            // Small delay to ensure selection is finalized
+            setTimeout(() => {
+                const selection = window.getSelection();
+                const currentSelection = selection.toString().trim();
+                
+                console.log("⌨️ Keyboard selection event:", { 
+                    key: event.key,
+                    hasSelection: !!currentSelection,
+                    selectionLength: currentSelection.length,
+                    rangeCount: selection.rangeCount,
+                    isCollapsed: selection.isCollapsed,
+                    text: currentSelection.substring(0, 50) + "..."
+                });
+                
+                // Process keyboard selections only if they're complete and valid
+                if (selection && currentSelection && 
+                    selection.rangeCount > 0 && 
+                    !selection.isCollapsed &&
+                    currentSelection !== lastProcessedSelection) {
+                    
+                    console.log("✅ Keyboard processing selection:", currentSelection.substring(0, 50) + "...");
+                    processSelection(selection);
+                    lastProcessedSelection = currentSelection;
+                    lastSelection = currentSelection;
+                } else if (currentSelection === lastProcessedSelection) {
+                    console.log("🔄 Same keyboard selection already processed");
+                }
+            }, 100); // Small delay for keyboard selections
         }
-    }, 100));
+    });
     
     // Helper function to get normalized text from DOM elements, handling links better
     function getTextFromContainer(container) {
@@ -518,12 +683,21 @@ function updateSidebar(word, sentence, selectedText = "") {
         const range = selection.getRangeAt(0);
         const selectedText = selection.toString().trim();
         
+        console.log("🔍 Extracting sentence for selection:", selectedText.substring(0, 50) + "...");
+        
+        // Check if the selected text looks like a complete sentence
+        const endsWithPunctuation = /[.!?]$/.test(selectedText);
+        const startsWithCapital = /^[A-Z]/.test(selectedText);
+        
+        if (endsWithPunctuation && startsWithCapital && selectedText.length > 10) {
+            console.log("📝 Selected text appears to be a complete sentence");
+            return selectedText;
+        }
+        
         // Get the start and end nodes
         const startNode = range.startContainer;
         
-        // A simpler approach: find the paragraph and then extract the sentence containing our selection
-        
-        // 1. Find the nearest paragraph or block element
+        // Find the nearest paragraph or block element
         let paragraph = startNode;
         while (paragraph && 
                (paragraph.nodeType === Node.TEXT_NODE ||
@@ -532,73 +706,80 @@ function updateSidebar(word, sentence, selectedText = "") {
             if (!paragraph || paragraph === document.body) break;
         }
         
-        // 2. If we found a paragraph, extract its text content
+        // If we found a paragraph, extract its text content
         if (paragraph && paragraph !== document.body) {
+            console.log("📄 Found paragraph container, extracting sentence from:", paragraph.tagName);
+            
             // Special handling for paragraphs with links
             const hasLinks = paragraph.querySelector('a') !== null;
             
             if (hasLinks) {
+                console.log("🔗 Paragraph has links, using mixed content extraction");
                 // Find all sentences in the paragraph, preserving inline elements
                 const sentences = getSentencesFromMixedContent(paragraph);
                 
                 // Find the sentence that contains our selected text
                 for (const sentence of sentences) {
                     if (sentence.includes(selectedText)) {
+                        console.log("✅ Found containing sentence in mixed content");
                         return sentence.trim();
                     }
                 }
                 
                 // If not found directly, try a more precise approach by looking at DOM proximity
-                // Get the closest ancestor element that contains the whole selection
                 let selectionContainer = startNode;
                 if (selectionContainer.nodeType === Node.TEXT_NODE) {
                     selectionContainer = selectionContainer.parentNode;
                 }
                 
-                // Get the text of this container and find the sentence there
                 const containerText = selectionContainer.textContent;
                 const containerSentences = splitTextIntoSentences(containerText);
                 
                 for (const sentence of containerSentences) {
                     if (sentence.includes(selectedText)) {
+                        console.log("✅ Found containing sentence in container");
                         return sentence.trim();
                     }
                 }
             } else {
+                console.log("📝 Paragraph has no links, using simple extraction");
                 // No links in paragraph, simpler case
                 const paragraphText = paragraph.textContent;
                 const sentences = splitTextIntoSentences(paragraphText);
                 
                 for (const sentence of sentences) {
                     if (sentence.includes(selectedText)) {
+                        console.log("✅ Found containing sentence in paragraph");
                         return sentence.trim();
                     }
                 }
             }
         }
         
+        console.log("⚠️ Using fallback sentence extraction");
+        
         // Fallback: use the direct context around the selection
-        // Get the parent element of the selection
         let parent = startNode;
         if (parent.nodeType === Node.TEXT_NODE) {
             parent = parent.parentNode;
         }
         
-        // Get whole text from parent
         const parentText = parent.textContent;
         
         // Try to find the sentence containing the selection
         const sentences = splitTextIntoSentences(parentText);
         for (const sentence of sentences) {
             if (sentence.includes(selectedText)) {
+                console.log("✅ Found containing sentence in parent");
                 return sentence.trim();
             }
         }
         
         // Last resort: try to extract a reasonable context around the selection
-        // Get the position of the selection in the parent text
         const selectionPos = parentText.indexOf(selectedText);
         if (selectionPos !== -1) {
+            console.log("🔧 Using position-based extraction");
+            
             // Find the beginning of the sentence
             let sentenceStart = 0;
             for (let i = selectionPos; i > 0; i--) {
@@ -617,10 +798,13 @@ function updateSidebar(word, sentence, selectedText = "") {
                 }
             }
             
-            return parentText.substring(sentenceStart, sentenceEnd).trim();
+            const extractedSentence = parentText.substring(sentenceStart, sentenceEnd).trim();
+            console.log("✅ Extracted sentence using position method");
+            return extractedSentence;
         }
         
         // Ultimate fallback - just return the parent text
+        console.log("🆘 Using ultimate fallback - parent text");
         return parentText.trim();
     }
     
