@@ -3,10 +3,10 @@ const selectionElement = document.getElementById("selection");
 const sentenceElement = document.getElementById("sentence");
 const translationsContainer = document.getElementById("translations-container");
 const addTranslationButton = document.getElementById("add-translation-button");
-const globalSettingsButton = document.querySelector(".global-settings-button");
-const globalSettingsPanel = document.getElementById("global-settings-panel");
-const closeSettingsButton = document.getElementById("close-settings");
+const globalSettingsButton = document.getElementById("global-settings-button");
+const backButton = document.getElementById("back-button");
 const saveSettingsButton = document.getElementById("save-settings");
+const appContainer = document.querySelector(".app-container");
 
 // Default settings
 let settings = {
@@ -17,7 +17,8 @@ let settings = {
         microsoft: false,
         yandex: false,
         openai: false,
-        claude: false
+        claude: false,
+        gemini: false
     },
     apiKeys: {
         google: "",
@@ -25,7 +26,8 @@ let settings = {
         microsoft: "",
         yandex: "",
         openai: "",
-        claude: ""
+        claude: "",
+        gemini: ""
     },
     defaultTargetLanguage: "ru",
     translationBoxes: [
@@ -46,7 +48,8 @@ const supportedLanguages = {
     microsoft: ["ru", "en", "de", "fr", "es", "zh", "ja"],
     yandex: ["ru", "en", "de", "fr", "es", "zh", "ja"],
     openai: ["ru", "en", "de", "fr", "es", "zh", "ja"],
-    claude: ["ru", "en", "de", "fr", "es", "zh", "ja"]
+    claude: ["ru", "en", "de", "fr", "es", "zh", "ja"],
+    gemini: ["ru", "en", "de", "fr", "es", "zh", "ja"]
 };
 
 // Provider display names
@@ -56,83 +59,237 @@ const providerNames = {
     microsoft: "Microsoft Translator",
     yandex: "Yandex Translate",
     openai: "OpenAI",
-    claude: "Claude"
+    claude: "Claude",
+    gemini: "Gemini"
 };
+
+// Force refresh all provider dropdowns immediately
+function forceRefreshAllProviderDropdowns() {
+    console.log('🔄 FORCE REFRESH ALL PROVIDER DROPDOWNS');
+    console.log('Current enabled providers:', settings.enabledProviders);
+    
+    const allProviderSelects = document.querySelectorAll('.provider-select');
+    console.log('Found provider selects:', allProviderSelects.length);
+    
+    allProviderSelects.forEach((select, index) => {
+        console.log(`Updating select ${index + 1}`);
+        const currentValue = select.value;
+        const newHTML = generateProviderOptions(currentValue);
+        select.innerHTML = newHTML;
+        
+        // Ensure the current value is still selected if it exists
+        if (currentValue && settings.enabledProviders[currentValue]) {
+            select.value = currentValue;
+        }
+    });
+    
+    console.log('✅ Force refresh complete');
+}
+
+// Debug function to inspect current state (call from console)
+function debugTranslator() {
+    console.log('=== TRANSLATOR DEBUG INFO ===');
+    console.log('Current settings:', settings);
+    console.log('Translation boxes in DOM:', translationsContainer ? translationsContainer.children.length : 'Container not found');
+    
+    if (translationsContainer) {
+        console.log('DOM boxes:', Array.from(translationsContainer.children).map(box => ({
+            provider: box.getAttribute('data-provider'),
+            language: box.querySelector('.language-select')?.value
+        })));
+    }
+    
+    // Check provider selects
+    const providerSelects = document.querySelectorAll('.provider-select');
+    console.log('Provider selects found:', providerSelects.length);
+    providerSelects.forEach((select, index) => {
+        console.log(`Select ${index + 1}:`, {
+            value: select.value,
+            options: Array.from(select.options).map(opt => opt.value)
+        });
+    });
+    
+    // Check storage directly
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+        chrome.storage.sync.get("translatorSettings", (result) => {
+            console.log('Storage contents:', result);
+        });
+    } else {
+        console.log('Chrome storage not available');
+    }
+    
+    console.log('=== END DEBUG INFO ===');
+}
+
+// Manual test function to check Gemini status
+function testGemini() {
+    console.log('🧪 TESTING GEMINI STATUS');
+    console.log('Gemini enabled in settings:', settings.enabledProviders?.gemini);
+    console.log('Gemini API key present:', !!settings.apiKeys?.gemini);
+    
+    // Force enable Gemini for testing
+    if (!settings.enabledProviders?.gemini) {
+        console.log('⚡ Enabling Gemini for test...');
+        if (!settings.enabledProviders) settings.enabledProviders = {};
+        settings.enabledProviders.gemini = true;
+        
+        // Update checkbox in UI
+        const geminiCheckbox = document.getElementById('enable-gemini');
+        if (geminiCheckbox) {
+            geminiCheckbox.checked = true;
+            console.log('✅ Updated Gemini checkbox');
+        } else {
+            console.log('❌ Gemini checkbox not found');
+        }
+    }
+    
+    // Refresh dropdowns
+    console.log('🔄 Refreshing all dropdowns...');
+    forceRefreshAllProviderDropdowns();
+    
+    // Check if Gemini now appears in options
+    const providerSelects = document.querySelectorAll('.provider-select');
+    providerSelects.forEach((select, index) => {
+        const geminiOption = Array.from(select.options).find(opt => opt.value === 'gemini');
+        console.log(`Select ${index + 1} has Gemini option:`, !!geminiOption);
+    });
+    
+    console.log('✅ Test complete');
+}
+
+// Attach functions to window immediately
+window.forceRefreshDropdowns = forceRefreshAllProviderDropdowns;
+window.debugTranslator = debugTranslator;  
+window.testGemini = testGemini;
 
 // Initialize the sidebar
 function initializeSidebar() {
     console.log('=== SIDEBAR INITIALIZATION START ===');
     console.log('DOM loaded, starting sidebar initialization...');
+    console.log('Running in iframe context:', window !== window.top);
+    console.log('Chrome APIs available:', typeof chrome !== 'undefined' && !!chrome.runtime);
     
-    // Setup event listeners first
-    console.log('Setting up event listeners...');
-    setupEventListeners();
+    // Ensure debug functions are available
+    console.log('🔧 Debug functions available: forceRefreshDropdowns, debugTranslator, testGemini');
     
-    // Load saved settings (this will also restore translation boxes)
-    console.log('Loading settings...');
-    loadSettings();
-    
-    console.log('=== SIDEBAR INITIALIZATION COMPLETE ===');
+    try {
+        // Setup event listeners first
+        console.log('Setting up event listeners...');
+        setupEventListeners();
+        
+        // Load saved settings (this will also restore translation boxes)
+        console.log('Loading settings...');
+        loadSettings();
+        
+        // Post a message to parent window to indicate sidebar is ready
+        if (window.parent && window.parent !== window) {
+            try {
+                window.parent.postMessage({
+                    type: 'sidebarReady',
+                    source: 'translatorSidebar'
+                }, '*');
+                console.log('Posted sidebarReady message to parent');
+            } catch (error) {
+                console.warn('Could not post message to parent:', error);
+            }
+        }
+        
+        console.log('=== SIDEBAR INITIALIZATION COMPLETE ===');
+    } catch (error) {
+        console.error('=== SIDEBAR INITIALIZATION FAILED ===');
+        console.error('Error during sidebar initialization:', error);
+        console.error('Stack trace:', error.stack);
+        
+        // Still try to show basic UI even if initialization fails
+        try {
+            updateSettingsUI();
+            restoreTranslationBoxes();
+        } catch (fallbackError) {
+            console.error('Even fallback initialization failed:', fallbackError);
+        }
+    }
 }
 
 // Load settings from storage
 function loadSettings() {
     console.log('LoadSettings: Attempting to load settings from chrome.storage...');
     
+    // Check if Chrome APIs are available
     if (typeof chrome === 'undefined' || !chrome.storage) {
-        console.error('LoadSettings: Chrome storage API not available!');
-        console.log('LoadSettings: Using default settings and restoring boxes...');
+        console.warn('LoadSettings: Chrome storage API not available, using defaults');
+        console.log('LoadSettings: This might be expected in iframe context');
         updateSettingsUI();
         restoreTranslationBoxes();
         return;
     }
     
-    chrome.storage.sync.get("translatorSettings", (result) => {
-        console.log('LoadSettings: Storage query result:', result);
-        
-        if (chrome.runtime.lastError) {
-            console.error('LoadSettings: Chrome runtime error:', chrome.runtime.lastError);
-            updateSettingsUI();
-            restoreTranslationBoxes();
-            return;
-        }
-        
-        if (result.translatorSettings) {
-            console.log('LoadSettings: Found saved settings:', result.translatorSettings);
-            settings = result.translatorSettings;
+    try {
+        chrome.storage.sync.get("translatorSettings", (result) => {
+            console.log('LoadSettings: Storage query result:', result);
             
-            // Ensure translationBoxes array exists
-            if (!settings.translationBoxes) {
-                console.log('LoadSettings: No translationBoxes in saved settings, creating default...');
-                settings.translationBoxes = [{ provider: "google", targetLanguage: "ru" }];
+            if (chrome.runtime.lastError) {
+                console.error('LoadSettings: Chrome runtime error:', chrome.runtime.lastError);
+                console.log('LoadSettings: Falling back to defaults...');
+                updateSettingsUI();
+                restoreTranslationBoxes();
+                return;
             }
             
-            console.log('LoadSettings: Translation boxes to restore:', settings.translationBoxes);
+            if (result.translatorSettings) {
+                console.log('LoadSettings: Found saved settings, merging with defaults...');
+                // Merge saved settings with defaults to ensure all properties exist
+                settings = {
+                    ...settings,
+                    ...result.translatorSettings,
+                    // Ensure nested objects are properly merged
+                    enabledProviders: {
+                        ...settings.enabledProviders,
+                        ...(result.translatorSettings.enabledProviders || {})
+                    },
+                    apiKeys: {
+                        ...settings.apiKeys,
+                        ...(result.translatorSettings.apiKeys || {})
+                    }
+                };
+                console.log('LoadSettings: Final merged settings:', settings);
+            } else {
+                console.log('LoadSettings: No saved settings found, using defaults');
+            }
+            
+            // Update UI and restore boxes
             updateSettingsUI();
-            
-            // Now restore translation boxes with the loaded settings
-            console.log('LoadSettings: Now restoring translation boxes...');
             restoreTranslationBoxes();
-        } else {
-            console.log('LoadSettings: No saved settings found, using defaults...');
-            // Save default settings if none exist
-            saveSettings();
-            
-            // Restore default translation boxes
-            console.log('LoadSettings: Restoring default translation boxes...');
-            restoreTranslationBoxes();
-        }
-    });
+        });
+    } catch (error) {
+        console.error('LoadSettings: Error accessing chrome.storage:', error);
+        console.log('LoadSettings: Using default settings and proceeding...');
+        updateSettingsUI();
+        restoreTranslationBoxes();
+    }
 }
 
 // Save settings to storage
 function saveSettings() {
-    // Save current translation boxes layout
-    saveTranslationBoxesLayout();
+    console.log('SaveSettings: Attempting to save settings...');
+    console.log('SaveSettings: Current settings:', settings);
     
-    chrome.storage.sync.set({ translatorSettings: settings }, () => {
-        console.log("Settings saved");
-    });
+    // Check if Chrome APIs are available
+    if (typeof chrome === 'undefined' || !chrome.storage) {
+        console.warn('SaveSettings: Chrome storage API not available, skipping save');
+        return;
+    }
+    
+    try {
+        chrome.storage.sync.set({ "translatorSettings": settings }, () => {
+            if (chrome.runtime.lastError) {
+                console.error('SaveSettings: Error saving settings:', chrome.runtime.lastError);
+            } else {
+                console.log('SaveSettings: Settings saved successfully');
+            }
+        });
+    } catch (error) {
+        console.error('SaveSettings: Error accessing chrome.storage:', error);
+    }
 }
 
 // Save current translation boxes layout
@@ -269,18 +426,20 @@ function setupEventListeners() {
         saveSettings();
     });
     
-    // Global settings button
+    // Global settings button - slide to settings page
     globalSettingsButton.addEventListener("click", () => {
-        globalSettingsPanel.classList.remove("hidden");
+        appContainer.classList.add("settings-open");
     });
     
-    // Close settings button
-    closeSettingsButton.addEventListener("click", () => {
-        globalSettingsPanel.classList.add("hidden");
+    // Back button - slide back to main page
+    backButton.addEventListener("click", () => {
+        appContainer.classList.remove("settings-open");
     });
     
     // Save settings button
     saveSettingsButton.addEventListener("click", () => {
+        console.log('💾 SAVE SETTINGS CLICKED');
+        
         // Save word count setting
         const maxWordCountInput = document.getElementById('max-word-count');
         if (maxWordCountInput) {
@@ -291,7 +450,13 @@ function setupEventListeners() {
         for (const provider in settings.enabledProviders) {
             const checkbox = document.getElementById(`enable-${provider}`);
             if (checkbox) {
-                settings.enabledProviders[provider] = checkbox.checked;
+                const wasEnabled = settings.enabledProviders[provider];
+                const isNowEnabled = checkbox.checked;
+                settings.enabledProviders[provider] = isNowEnabled;
+                
+                if (wasEnabled !== isNowEnabled) {
+                    console.log(`Provider ${provider} changed from ${wasEnabled} to ${isNowEnabled}`);
+                }
             }
         }
         
@@ -303,21 +468,33 @@ function setupEventListeners() {
             }
         }
         
-        saveSettings();
-        globalSettingsPanel.classList.add("hidden");
+        console.log('Settings after update:', settings);
         
-        // Refresh translation boxes based on new settings
-        refreshTranslationBoxes();
+        saveSettings();
+        
+        // Slide back to main page
+        appContainer.classList.remove("settings-open");
+        
+        // Force refresh all dropdowns immediately
+        setTimeout(() => {
+            console.log('🔄 About to force refresh dropdowns...');
+            forceRefreshAllProviderDropdowns();
+            
+            // Also call the regular refresh
+            refreshTranslationBoxes();
+        }, 100);
         
         // Send updated settings to content script
-        chrome.tabs && chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
-            if (tabs[0]) {
-                chrome.tabs.sendMessage(tabs[0].id, {
-                    action: "updateSettings",
-                    settings: { maxWordCount: settings.maxWordCount }
-                });
-            }
-        });
+        if (typeof chrome !== 'undefined' && chrome.tabs) {
+            chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+                if (tabs[0]) {
+                    chrome.tabs.sendMessage(tabs[0].id, {
+                        action: "updateSettings",
+                        settings: { maxWordCount: settings.maxWordCount }
+                    });
+                }
+            });
+        }
     });
     
     // Set up delegates for dynamic elements
@@ -325,21 +502,31 @@ function setupEventListeners() {
     translationsContainer.addEventListener("change", handleTranslationsContainerChange);
 }
 
-// Handle messages from content script
+// Handle messages from content script (with proper iframe messaging)
 function handleContentScriptMessage(event) {
-    // Verify the message has the required data
-    if (!event.data || !event.data.word) return;
+    // Ensure we only handle messages from our content script
+    if (event.origin !== window.location.origin && event.source !== window.parent) {
+        return;
+    }
     
-    // Update the UI with new word and context
-    selectionElement.textContent = event.data.selectedText || "No selection";
-    sentenceElement.textContent = event.data.sentence || "";
+    const data = event.data;
     
-    // Store current word and sentence
-    currentWord = event.data.word;
-    currentSentence = event.data.sentence || "";
-    
-    // Translate with all visible translation boxes
-    translateAllBoxes();
+    // Handle different message types
+    if (data && data.type === "translateWord") {
+        currentWord = data.word || "";
+        currentSentence = data.sentence || "";
+        
+        // Update UI
+        if (selectionElement) {
+            selectionElement.textContent = currentWord;
+        }
+        if (sentenceElement) {
+            sentenceElement.textContent = currentSentence;
+        }
+        
+        // Translate in all boxes
+        translateAllBoxes();
+    }
 }
 
 // Translate all visible translation boxes
@@ -399,6 +586,55 @@ function handleTranslationsContainerChange(event) {
         box.setAttribute('data-provider', newProvider);
         box.querySelector('.provider-name').textContent = providerNames[newProvider];
         
+        // Update model selector visibility - add or remove model selector based on provider
+        const existingModelSelector = box.querySelector('.model-selector');
+        if (existingModelSelector) {
+            existingModelSelector.remove();
+        }
+        
+        // Add model selector for AI providers
+        if (newProvider === 'openai' || newProvider === 'claude' || newProvider === 'gemini') {
+            const langSelector = box.querySelector('.language-selector');
+            const boxId = box.id;
+            let modelSelectorHTML = '';
+            
+            if (newProvider === 'openai') {
+                modelSelectorHTML = `<div class="model-selector">
+                    <label for="model-select-${boxId}">Model:</label>
+                    <select class="model-select" id="model-select-${boxId}">
+                        <option value="gpt-4o">GPT-4o</option>
+                        <option value="gpt-4o-mini">GPT-4o mini</option>
+                        <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                        <option value="gpt-3.5-turbo" selected>GPT-3.5 Turbo</option>
+                    </select>
+                </div>`;
+            } else if (newProvider === 'claude') {
+                modelSelectorHTML = `<div class="model-selector">
+                    <label for="model-select-${boxId}">Model:</label>
+                    <select class="model-select" id="model-select-${boxId}">
+                        <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                        <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+                        <option value="claude-3-haiku-20240307" selected>Claude 3 Haiku</option>
+                        <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
+                        <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+                    </select>
+                </div>`;
+            } else if (newProvider === 'gemini') {
+                modelSelectorHTML = `<div class="model-selector">
+                    <label for="model-select-${boxId}">Model:</label>
+                    <select class="model-select" id="model-select-${boxId}">
+                        <option value="gemini-1.5-flash-latest" selected>Gemini 1.5 Flash</option>
+                        <option value="gemini-1.5-pro-latest">Gemini 1.5 Pro</option>
+                        <option value="gemini-1.0-pro">Gemini 1.0 Pro</option>
+                    </select>
+                </div>`;
+            }
+            
+            if (modelSelectorHTML) {
+                langSelector.insertAdjacentHTML('afterend', modelSelectorHTML);
+            }
+        }
+        
         // Hide settings
         const settingsPanel = box.querySelector('.provider-settings');
         settingsPanel.classList.add('hidden');
@@ -431,6 +667,25 @@ function handleTranslationsContainerChange(event) {
         saveTranslationBoxesLayout();
         saveSettings();
     }
+    
+    // Model selection change
+    if (event.target.classList.contains('model-select')) {
+        const box = event.target.closest('.translation-box');
+        const provider = box.getAttribute('data-provider');
+        const langSelect = box.querySelector('.language-select');
+        const targetLang = langSelect ? langSelect.value : settings.defaultTargetLanguage;
+        
+        // Hide settings
+        const settingsPanel = box.querySelector('.provider-settings');
+        settingsPanel.classList.add('hidden');
+        
+        // Translate with new model
+        translateText(box, provider, targetLang);
+        
+        // Save the updated layout
+        saveTranslationBoxesLayout();
+        saveSettings();
+    }
 }
 
 // Add a new translation box
@@ -444,40 +699,62 @@ function addTranslationBox(provider, targetLang) {
     boxDiv.setAttribute('data-provider', provider);
     boxDiv.id = boxId;
     
+    // Generate model selector HTML for AI providers
+    const getModelSelectorHTML = (provider) => {
+        if (provider === 'openai') {
+            return `<div class="model-selector">
+                <label for="model-select-${boxId}">Model:</label>
+                <select class="model-select" id="model-select-${boxId}">
+                    <option value="gpt-4o">GPT-4o</option>
+                    <option value="gpt-4o-mini">GPT-4o mini</option>
+                    <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                    <option value="gpt-3.5-turbo" selected>GPT-3.5 Turbo</option>
+                </select>
+            </div>`;
+        } else if (provider === 'claude') {
+            return `<div class="model-selector">
+                <label for="model-select-${boxId}">Model:</label>
+                <select class="model-select" id="model-select-${boxId}">
+                    <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                    <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+                    <option value="claude-3-haiku-20240307" selected>Claude 3 Haiku</option>
+                    <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
+                    <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+                </select>
+            </div>`;
+        } else if (provider === 'gemini') {
+            return `<div class="model-selector">
+                <label for="model-select-${boxId}">Model:</label>
+                <select class="model-select" id="model-select-${boxId}">
+                    <option value="gemini-1.5-flash-latest" selected>Gemini 1.5 Flash</option>
+                    <option value="gemini-1.5-pro-latest">Gemini 1.5 Pro</option>
+                    <option value="gemini-1.0-pro">Gemini 1.0 Pro</option>
+                </select>
+            </div>`;
+        }
+        return '';
+    };
+    
     // When generating provider settings, exclude API key field for Google
-    const providerSettingsHTML = provider === 'google' ?
-        `<div class="provider-settings hidden">
-            <div class="provider-selector">
-                <label for="provider-select-${boxId}">Translation service:</label>
-                <select class="provider-select" id="provider-select-${boxId}">
-                    ${generateProviderOptions(provider)}
-                </select>
-            </div>
-            <div class="language-selector">
-                <label for="language-select-${boxId}">Target language:</label>
-                <select class="language-select" id="language-select-${boxId}">
-                    ${generateLanguageOptions(provider, targetLang)}
-                </select>
-            </div>
-        </div>` :
-        `<div class="provider-settings hidden">
-            <div class="provider-selector">
-                <label for="provider-select-${boxId}">Translation service:</label>
-                <select class="provider-select" id="provider-select-${boxId}">
-                    ${generateProviderOptions(provider)}
-                </select>
-            </div>
-            <div class="language-selector">
-                <label for="language-select-${boxId}">Target language:</label>
-                <select class="language-select" id="language-select-${boxId}">
-                    ${generateLanguageOptions(provider, targetLang)}
-                </select>
-            </div>
-            ${provider !== 'google' ? 
-            `<div class="api-key-reminder">
-                <small>API key required in global settings</small>
-            </div>` : ''}
-        </div>`;
+    const providerSettingsHTML = `<div class="provider-settings hidden">
+        <div class="provider-selector">
+            <label for="provider-select-${boxId}">Translation service:</label>
+            <select class="provider-select" id="provider-select-${boxId}">
+                ${generateProviderOptions(provider)}
+            </select>
+        </div>
+        <div class="language-selector">
+            <label for="language-select-${boxId}">Target language:</label>
+            <select class="language-select" id="language-select-${boxId}">
+                ${generateLanguageOptions(provider, targetLang)}
+            </select>
+        </div>
+        ${getModelSelectorHTML(provider)}
+        ${provider !== 'google' ? 
+        `<div class="api-key-reminder">
+            <small>API key required in global settings</small>
+        </div>` : ''}
+    </div>`;
     
     // Use the proper HTML with conditional API key reminders
     boxDiv.innerHTML = `
@@ -518,16 +795,25 @@ function addTranslationBox(provider, targetLang) {
 
 // Generate HTML options for provider select
 function generateProviderOptions(selectedProvider) {
+    console.log('=== GENERATE PROVIDER OPTIONS ===');
+    console.log('Selected provider:', selectedProvider);
+    console.log('Available providers in settings:', Object.keys(settings.enabledProviders));
+    console.log('Enabled providers:', Object.entries(settings.enabledProviders).filter(([provider, enabled]) => enabled).map(([provider]) => provider));
+    
     let options = '';
     
     for (const provider in settings.enabledProviders) {
         if (settings.enabledProviders[provider]) {
+            console.log(`Adding provider option: ${provider} (${providerNames[provider]})`);
             options += `<option value="${provider}" ${provider === selectedProvider ? 'selected' : ''}>
                 ${providerNames[provider]}
             </option>`;
+        } else {
+            console.log(`Skipping disabled provider: ${provider}`);
         }
     }
     
+    console.log('Final options HTML:', options);
     return options;
 }
 
@@ -562,14 +848,35 @@ function getLanguageName(langCode) {
 
 // Refresh translation boxes based on settings
 function refreshTranslationBoxes() {
+    console.log('=== REFRESH TRANSLATION BOXES START ===');
+    console.log('Current enabled providers:', settings.enabledProviders);
+    
     // Get current boxes
     const boxes = document.querySelectorAll('.translation-box');
+    console.log('Found translation boxes:', boxes.length);
     
-    // Check if each box's provider is still enabled
-    boxes.forEach(box => {
+    // Update all boxes to reflect current settings
+    boxes.forEach((box, index) => {
         const provider = box.getAttribute('data-provider');
+        console.log(`Processing box ${index + 1}: current provider = ${provider}`);
         
+        // Always refresh provider dropdown options to include newly enabled providers
+        const providerSelect = box.querySelector('.provider-select');
+        if (providerSelect) {
+            const currentValue = providerSelect.value || provider;
+            console.log(`Updating provider dropdown for box ${index + 1}, current value: ${currentValue}`);
+            
+            const newOptions = generateProviderOptions(currentValue);
+            console.log(`Generated options for box ${index + 1}:`, newOptions);
+            
+            providerSelect.innerHTML = newOptions;
+        } else {
+            console.log(`No provider select found for box ${index + 1}`);
+        }
+        
+        // Check if current provider is still enabled
         if (!settings.enabledProviders[provider]) {
+            console.log(`Provider ${provider} is disabled, switching to enabled provider`);
             // Provider is disabled, need to change to an enabled one
             const newProvider = getFirstEnabledProvider();
             
@@ -578,10 +885,10 @@ function refreshTranslationBoxes() {
                 box.setAttribute('data-provider', newProvider);
                 box.querySelector('.provider-name').textContent = providerNames[newProvider];
                 
-                // Update provider options
-                const providerSelect = box.querySelector('.provider-select');
+                // Update provider dropdown
                 if (providerSelect) {
                     providerSelect.innerHTML = generateProviderOptions(newProvider);
+                    providerSelect.value = newProvider;
                 }
                 
                 // Update language options
@@ -591,22 +898,80 @@ function refreshTranslationBoxes() {
                     langSelect.innerHTML = generateLanguageOptions(newProvider, currentLang);
                 }
                 
+                // Update model selector if needed
+                updateModelSelector(box, newProvider);
+                
                 // Retranslate
                 if (currentWord) {
                     translateText(box, newProvider, langSelect ? langSelect.value : settings.defaultTargetLanguage);
                 }
             }
         } else {
-            // Provider is still enabled, just refresh the provider options
-            const providerSelect = box.querySelector('.provider-select');
-            if (providerSelect) {
-                providerSelect.innerHTML = generateProviderOptions(provider);
-            }
+            console.log(`Provider ${provider} is still enabled, updating model selector only`);
+            // Provider is still enabled, but make sure model selector is updated
+            updateModelSelector(box, provider);
         }
     });
     
+    console.log('=== REFRESH TRANSLATION BOXES COMPLETE ===');
+    
     // Save the updated layout
     saveTranslationBoxesLayout();
+}
+
+// Helper function to update model selector for AI providers
+function updateModelSelector(box, provider) {
+    const existingModelSelector = box.querySelector('.model-selector');
+    const boxId = box.id;
+    
+    // Remove existing model selector
+    if (existingModelSelector) {
+        existingModelSelector.remove();
+    }
+    
+    // Add model selector for AI providers
+    if (provider === 'openai' || provider === 'claude' || provider === 'gemini') {
+        const langSelector = box.querySelector('.language-selector');
+        if (langSelector) {
+            let modelSelectorHTML = '';
+            
+            if (provider === 'openai') {
+                modelSelectorHTML = `<div class="model-selector">
+                    <label for="model-select-${boxId}">Model:</label>
+                    <select class="model-select" id="model-select-${boxId}">
+                        <option value="gpt-4o">GPT-4o</option>
+                        <option value="gpt-4o-mini">GPT-4o mini</option>
+                        <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                        <option value="gpt-3.5-turbo" selected>GPT-3.5 Turbo</option>
+                    </select>
+                </div>`;
+            } else if (provider === 'claude') {
+                modelSelectorHTML = `<div class="model-selector">
+                    <label for="model-select-${boxId}">Model:</label>
+                    <select class="model-select" id="model-select-${boxId}">
+                        <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                        <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+                        <option value="claude-3-haiku-20240307" selected>Claude 3 Haiku</option>
+                        <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
+                        <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+                    </select>
+                </div>`;
+            } else if (provider === 'gemini') {
+                modelSelectorHTML = `<div class="model-selector">
+                    <label for="model-select-${boxId}">Model:</label>
+                    <select class="model-select" id="model-select-${boxId}">
+                        <option value="gemini-1.5-flash-latest" selected>Gemini 1.5 Flash</option>
+                        <option value="gemini-1.5-pro-latest">Gemini 1.5 Pro</option>
+                        <option value="gemini-1.0-pro">Gemini 1.0 Pro</option>
+                    </select>
+                </div>`;
+            }
+            
+            if (modelSelectorHTML) {
+                langSelector.insertAdjacentHTML('afterend', modelSelectorHTML);
+            }
+        }
+    }
 }
 
 // Get the first enabled provider
@@ -653,6 +1018,9 @@ function translateText(boxElement, provider, targetLang) {
             break;
         case 'claude':
             translateWithClaude(currentWord, currentSentence, targetLang, boxElement);
+            break;
+        case 'gemini':
+            translateWithGemini(currentWord, currentSentence, targetLang, boxElement);
             break;
         default:
             // Fallback to Google
@@ -941,6 +1309,10 @@ function translateWithOpenAI(word, sentence, targetLang, boxElement) {
     
     const targetLanguageName = languageNames[targetLang] || targetLang;
     
+    // Get model from the per-box selector
+    const modelSelect = boxElement.querySelector('.model-select');
+    const modelName = modelSelect ? modelSelect.value : 'gpt-3.5-turbo';
+    
     // Call the OpenAI API
     const url = 'https://api.openai.com/v1/chat/completions';
     const contextPrompt = sentence ? `In the context: "${sentence}"` : '';
@@ -952,7 +1324,7 @@ function translateWithOpenAI(word, sentence, targetLang, boxElement) {
             'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-            model: 'gpt-3.5-turbo',
+            model: modelName,
             messages: [
                 {
                     role: 'system',
@@ -1018,6 +1390,10 @@ function translateWithClaude(word, sentence, targetLang, boxElement) {
     
     const targetLanguageName = languageNames[targetLang] || targetLang;
     
+    // Get model from the per-box selector
+    const modelSelect = boxElement.querySelector('.model-select');
+    const modelName = modelSelect ? modelSelect.value : 'claude-3-haiku-20240307';
+    
     // Call the Claude API
     const url = 'https://api.anthropic.com/v1/messages';
     const contextPrompt = sentence ? `Consider the context: "${sentence}"` : '';
@@ -1030,7 +1406,7 @@ function translateWithClaude(word, sentence, targetLang, boxElement) {
             'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-            model: 'claude-3-haiku-20240307',
+            model: modelName,
             max_tokens: 100,
             messages: [
                 {
@@ -1053,6 +1429,82 @@ function translateWithClaude(word, sentence, targetLang, boxElement) {
         // Check for valid response
         if (data.content && data.content.length > 0) {
             translationText.textContent = data.content[0].text.trim();
+        } else {
+            throw new Error('Invalid translation response');
+        }
+    })
+    .catch(error => {
+        console.error('Translation error:', error);
+        showTranslationError(boxElement, "Translation failed. Please check your API key and try again.");
+    });
+}
+
+// Translation implementation for Gemini
+function translateWithGemini(word, sentence, targetLang, boxElement) {
+    const apiKey = settings.apiKeys.gemini;
+    
+    if (!apiKey) {
+        showTranslationError(boxElement, "API key required for Gemini. Please add your API key in settings.");
+        return;
+    }
+    
+    const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
+    const translationText = boxElement.querySelector('.translation-text');
+    
+    // Show loading indicator
+    loadingIndicator.classList.remove('hidden');
+    
+    // Define the language to use in the prompt
+    const languageNames = {
+        'ru': 'Russian',
+        'en': 'English',
+        'de': 'German',
+        'fr': 'French',
+        'es': 'Spanish',
+        'zh': 'Chinese',
+        'ja': 'Japanese'
+    };
+    
+    const targetLanguageName = languageNames[targetLang] || targetLang;
+    
+    // Get model from the per-box selector
+    const modelSelect = boxElement.querySelector('.model-select');
+    const modelName = modelSelect ? modelSelect.value : 'gemini-1.5-flash-latest';
+    
+    // Call the Gemini API
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    const contextPrompt = sentence ? `Consider the context: "${sentence}"` : '';
+    
+    fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            contents: [
+                {
+                    parts: [
+                        {
+                            text: `Translate the word "${word}" to ${targetLanguageName}. ${contextPrompt} Only provide the translation, without any explanations or additional text.`
+                        }
+                    ]
+                }
+            ]
+        })
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Translation API error');
+        }
+        return response.json();
+    })
+    .then(data => {
+        // Hide loading
+        loadingIndicator.classList.add('hidden');
+        
+        // Check for valid response
+        if (data.candidates && data.candidates.length > 0 && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts.length > 0) {
+            translationText.textContent = data.candidates[0].content.parts[0].text.trim();
         } else {
             throw new Error('Invalid translation response');
         }
@@ -1091,33 +1543,3 @@ if (document.readyState === 'loading') {
     console.log('Document already loaded, initializing immediately');
     initializeSidebar();
 }
-
-// Debug function to inspect current state (call from console)
-window.debugTranslator = function() {
-    console.log('=== TRANSLATOR DEBUG INFO ===');
-    console.log('Current settings:', settings);
-    console.log('Translation boxes in DOM:', translationsContainer.children.length);
-    console.log('DOM boxes:', Array.from(translationsContainer.children).map(box => ({
-        provider: box.getAttribute('data-provider'),
-        language: box.querySelector('.language-select')?.value
-    })));
-    
-    // Check storage directly
-    if (typeof chrome !== 'undefined' && chrome.storage) {
-        chrome.storage.sync.get("translatorSettings", (result) => {
-            console.log('Storage contents:', result);
-        });
-    } else {
-        console.log('Chrome storage not available');
-    }
-    
-    console.log('=== END DEBUG INFO ===');
-};
-
-// Auto-call debug function after a short delay for immediate insight
-setTimeout(() => {
-    if (window.debugTranslator) {
-        console.log('Auto-running debug after initialization...');
-        window.debugTranslator();
-    }
-}, 2000);

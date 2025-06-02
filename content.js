@@ -238,30 +238,29 @@ function createSidebar() {
         }
     }
     
-    // Function to update data in sidebar
-function updateSidebar(word, sentence, selectedText = "") {
-    // Clean HTML entities from sentence before sending
-    sentence = decodeHtmlEntities(sentence);
-        
-    // Try updating iframe first
-    const sidebar = document.getElementById("translator-sidebar");
-    if (sidebar) {
-        try {
-            sidebar.contentWindow.postMessage({ word, sentence, selectedText }, "*");
-        } catch (e) {
-            console.log("Error posting message to iframe:", e);
-                
-            // If posting to iframe fails, try the alternative approach
+    // Function to update sidebar with new selection
+    function updateSidebar(word, sentence, selectedText = "") {
+        const sidebar = document.getElementById("translator-sidebar");
+        if (sidebar && sidebar.contentWindow) {
+            try {
+                // Use postMessage for iframe communication
+                sidebar.contentWindow.postMessage({
+                    type: "translateWord",
+                    word: word,
+                    sentence: sentence,
+                    selectedText: selectedText
+                }, "*");
+                console.log("📤 Sent translation request to sidebar:", { word, sentence: sentence.substring(0, 50) + "..." });
+            } catch (error) {
+                console.error("❌ Error sending message to sidebar:", error);
+                // Fallback: try alternative method
+                updateSidebarAlternative(word, sentence, selectedText);
+            }
+        } else {
+            console.log("⚠️ Sidebar iframe not found or not ready, trying alternative update");
             updateSidebarAlternative(word, sentence, selectedText);
-                
-            // Check if we need to recreate the sidebar
-            ensureSidebarLoaded();
         }
-    } else {
-        // If iframe doesn't exist, check for alternative container
-        updateSidebarAlternative(word, sentence, selectedText);
     }
-}
     
     // Function to hide sidebar
     function hideSidebar() {
@@ -295,39 +294,53 @@ function updateSidebar(word, sentence, selectedText = "") {
         }
     }
     
-    // Function to ensure sidebar is properly loaded
+    // Function to ensure sidebar is properly loaded (improved error handling)
     function ensureSidebarLoaded() {
         const sidebar = document.getElementById("translator-sidebar");
         
-        if (!sidebar) return;
-        
-        // Try to access the contentWindow to see if it's properly loaded
-        try {
-            const iframeWindow = sidebar.contentWindow;
-            
-            // If we can't access contentWindow or it's null, the iframe didn't load properly
-            if (!iframeWindow) {
-                console.log("Sidebar iframe not properly loaded, recreating...");
-                
-                // Remove the problematic iframe
-                document.body.removeChild(sidebar);
-                
-                // Create a new one with different technique for immersive reader
-                if (isEdgeImmersiveMode) {
-                    createImmersiveModeIframe();
-                } else {
-                    // Regular creation
-                    createSidebar();
-                }
-            }
-        } catch (e) {
-            console.log("Error accessing iframe contentWindow:", e);
-            
-            // Fallback creation for immersive reader
-            if (isEdgeImmersiveMode) {
-                createImmersiveModeIframe();
-            }
+        if (!sidebar) {
+            console.log("🔄 Sidebar iframe not found, recreating...");
+            createSidebar();
+            return;
         }
+        
+        // Check if iframe is loaded and accessible
+        try {
+            if (sidebar.contentDocument && sidebar.contentDocument.readyState === 'complete') {
+                console.log("✅ Sidebar iframe is loaded and ready");
+                return;
+            }
+        } catch (error) {
+            console.log("⚠️ Cannot access sidebar iframe content:", error.message);
+        }
+        
+        // If iframe exists but isn't ready, wait and try again
+        console.log("⏳ Sidebar iframe exists but not ready, waiting...");
+        
+        let attempts = 0;
+        const maxAttempts = 10;
+        const checkInterval = setInterval(() => {
+            attempts++;
+            
+            try {
+                if (sidebar.contentDocument && sidebar.contentDocument.readyState === 'complete') {
+                    console.log("✅ Sidebar iframe became ready after", attempts, "attempts");
+                    clearInterval(checkInterval);
+                    return;
+                }
+            } catch (error) {
+                // Iframe still not accessible, continue waiting
+            }
+            
+            if (attempts >= maxAttempts) {
+                console.log("❌ Sidebar iframe failed to load after", maxAttempts, "attempts, recreating...");
+                clearInterval(checkInterval);
+                
+                // Remove failed iframe and create new one
+                sidebar.remove();
+                setTimeout(() => createSidebar(), 100);
+            }
+        }, 200);
     }
     
     // Create sidebar with alternative method for immersive reader
@@ -893,6 +906,20 @@ function updateSidebar(word, sentence, selectedText = "") {
         return splitTextIntoSentences(fullText);
     }
     
+    // Listen for messages from the sidebar iframe
+    window.addEventListener('message', (event) => {
+        // Only handle messages from our sidebar
+        if (event.data && event.data.source === 'translatorSidebar') {
+            if (event.data.type === 'sidebarReady') {
+                console.log("✅ Received sidebar ready notification");
+                // If we have a pending selection, send it now
+                if (currentWord && currentSentence) {
+                    updateSidebar(currentWord, currentSentence, currentWord);
+                }
+            }
+        }
+    });
+
     // Initialize on page load
     initializeExtension();
     
