@@ -891,24 +891,22 @@ if (window.translatorExtensionLoaded) {
         // Listen for selection changes with debouncing
         document.addEventListener("selectionchange", enhancedSelectionChange);
         
-        // Enhanced mouse handling for Angular apps
-        let mouseDownTime = 0;
-        
+        // Track mouse state for better selection handling
         document.addEventListener("mousedown", (event) => {
-            mouseDownTime = Date.now();
+            // Reset selection state when starting a new selection
             if (selectionTimeout) {
                 clearTimeout(selectionTimeout);
             }
             isSelecting = false;
             isMouseDown = true;
-            console.log("🖱️ Mouse down detected");
-        });
-        
-        // Enhanced mouse up with better timing for Angular
-        document.addEventListener("mouseup", (event) => {
-            const mouseUpTime = Date.now();
-            const selectionDuration = mouseUpTime - mouseDownTime;
+            console.log("🖱️ Mouse down - starting selection");
             
+            // Clear any pending processing since user is starting a new selection
+            lastSelection = "";
+        });
+
+        // Primary trigger for processing selections - when mouse is released
+        document.addEventListener("mouseup", (event) => {
             isMouseDown = false;
             
             if (!sidebarEnabled) {
@@ -916,95 +914,104 @@ if (window.translatorExtensionLoaded) {
                 return;
             }
             
-            // Longer delay for Angular apps to ensure selection is stable
+            // Small delay to ensure selection is finalized
             setTimeout(() => {
                 const selection = window.getSelection();
                 const currentSelection = selection.toString().trim();
                 
-                console.log("🖱️ Mouse up analysis:", { 
+                console.log("🖱️ Mouse up - checking selection:", { 
                     hasSelection: !!currentSelection,
                     selectionLength: currentSelection.length,
-                    duration: selectionDuration,
                     rangeCount: selection.rangeCount,
                     isCollapsed: selection.isCollapsed,
-                    text: currentSelection.substring(0, 50) + "..."
+                    text: currentSelection.substring(0, 50) + "...",
+                    isDifferentFromLast: currentSelection !== lastProcessedSelection
                 });
                 
-                // Process selection with additional validation for Angular
+                // Process selection if we have valid content
                 if (selection && currentSelection && 
                     selection.rangeCount > 0 && 
                     !selection.isCollapsed &&
-                    currentSelection !== lastProcessedSelection &&
-                    currentSelection.length >= 2 && // Minimum length
-                    selectionDuration > 50) { // Must be intentional selection
+                    currentSelection.length >= 2) { // Minimum length
                     
-                    console.log("✅ Processing valid Angular selection:", currentSelection.substring(0, 50) + "...");
+                    console.log("✅ Mouse processing selection:", currentSelection.substring(0, 50) + "...");
                     processSelection(selection);
-                    lastProcessedSelection = currentSelection;
                     lastSelection = currentSelection;
+                } else if (!currentSelection) {
+                    console.log("📝 No selection after mouse up");
                 }
-            }, 150); // Longer delay for Angular apps
+            }, 50); // Small delay to ensure selection is stable
         });
         
-        // Enhanced keyboard selection for Angular
+        // Listen for keyboard events that might create selections
         document.addEventListener("keyup", (event) => {
             if (!sidebarEnabled) return;
             
-            // More comprehensive key detection for Angular apps
-            const selectionKeys = [
-                "Shift", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
-                "Home", "End", "PageUp", "PageDown"
-            ];
-            
-            const isSelectionKey = selectionKeys.includes(event.key) || 
-                                 (event.ctrlKey && event.key === "a") ||
-                                 (event.ctrlKey && event.key === "A");
-            
-            if (isSelectionKey) {
-                // Longer timeout for Angular apps
+            // Check for keys that typically end a selection
+            if (event.key === "Shift" || 
+                event.key === "ArrowLeft" || 
+                event.key === "ArrowRight" || 
+                event.key === "ArrowUp" || 
+                event.key === "ArrowDown" ||
+                event.key === "Home" ||
+                event.key === "End" ||
+                (event.ctrlKey && event.key === "a")) {
+                
+                // Small delay to ensure selection is finalized
                 setTimeout(() => {
                     const selection = window.getSelection();
                     const currentSelection = selection.toString().trim();
                     
-                    console.log("⌨️ Keyboard selection check:", { 
+                    console.log("⌨️ Keyboard selection event:", { 
                         key: event.key,
                         hasSelection: !!currentSelection,
                         selectionLength: currentSelection.length,
-                        text: currentSelection.substring(0, 30) + "..."
+                        rangeCount: selection.rangeCount,
+                        isCollapsed: selection.isCollapsed,
+                        text: currentSelection.substring(0, 50) + "...",
+                        isDifferentFromLast: currentSelection !== lastProcessedSelection
                     });
                     
+                    // Process keyboard selections only if they're complete and valid
                     if (selection && currentSelection && 
                         selection.rangeCount > 0 && 
                         !selection.isCollapsed &&
-                        currentSelection !== lastProcessedSelection &&
                         !isMouseDown) {
                         
-                        console.log("✅ Processing keyboard selection in Angular");
+                        console.log("✅ Keyboard processing selection:", currentSelection.substring(0, 50) + "...");
                         processSelection(selection);
-                        lastProcessedSelection = currentSelection;
+                        lastSelection = currentSelection;
                     }
-                }, 300); // Even longer delay for keyboard in Angular
+                }, 100); // Small delay for keyboard selections
             }
         });
         
-        // Add double-click handler for quick word selection in Angular
+        // Enhanced double-click handler for word selection
         document.addEventListener("dblclick", (event) => {
             if (!sidebarEnabled) return;
+            
+            console.log("🖱️ Double-click detected, processing selection");
             
             setTimeout(() => {
                 const selection = window.getSelection();
                 const currentSelection = selection.toString().trim();
                 
+                console.log("🖱️ Double-click selection:", { 
+                    hasSelection: !!currentSelection,
+                    selectionLength: currentSelection.length,
+                    text: currentSelection.substring(0, 50) + "...",
+                    isDifferentFromLast: currentSelection !== lastProcessedSelection
+                });
+                
                 if (selection && currentSelection && 
                     selection.rangeCount > 0 && 
-                    !selection.isCollapsed &&
-                    currentSelection !== lastProcessedSelection) {
+                    !selection.isCollapsed) {
                     
-                    console.log("🖱️ Processing double-click selection in Angular");
+                    console.log("✅ Double-click processing selection:", currentSelection.substring(0, 50) + "...");
                     processSelection(selection);
-                    lastProcessedSelection = currentSelection;
+                    lastSelection = currentSelection;
                 }
-            }, 100);
+            }, 50);
         });
         
         hasSelectionHandlers = true;
@@ -1136,7 +1143,8 @@ if (window.translatorExtensionLoaded) {
                     type: "translateWord",
                     word: word,
                     sentence: sentence,
-                    selectedText: selectedText
+                    selectedText: selectedText,
+                    isMouseDown: isMouseDown
                 }, "*");
                 console.log("📤 Sent translation request to sidebar:", { word, sentence: sentence.substring(0, 50) + "..." });
             } catch (error) {
@@ -1353,10 +1361,29 @@ if (window.translatorExtensionLoaded) {
         
         const selectedText = selection.toString().trim();
         
-        // Prevent duplicate processing if the same text was just processed
-        if (selectedText === lastProcessedSelection) {
-            console.log("🚫 Skipping duplicate selection processing");
+        console.log("✅ Processing selection attempt:", selectedText.substring(0, 50) + "...");
+        console.log("🔍 Previous processed selection:", lastProcessedSelection.substring(0, 50) + "...");
+        
+        // Check if mouse is still down - if so, user is still selecting
+        if (isMouseDown) {
+            console.log("🖱️ Mouse still down, user still selecting - not processing yet");
             return;
+        }
+        
+        // Improved duplicate detection - only skip if EXACTLY the same and processed recently
+        const now = Date.now();
+        const timeSinceLastProcessing = now - (window.lastProcessingTime || 0);
+        
+        if (selectedText === lastProcessedSelection && timeSinceLastProcessing < 2000) {
+            console.log("🚫 Skipping duplicate selection (same text within 2 seconds)");
+            return;
+        }
+        
+        // Reset previous state for new selection
+        if (selectedText !== lastProcessedSelection) {
+            console.log("🆕 New selection detected, resetting previous state");
+            lastProcessedSelection = "";
+            window.lastProcessingTime = 0;
         }
         
         console.log("✅ Processing new selection:", selectedText.substring(0, 50) + "...");
@@ -1397,6 +1424,10 @@ if (window.translatorExtensionLoaded) {
         currentWord = word;
         currentSentence = sentence;
         
+        // Mark as processed
+        lastProcessedSelection = selectedText;
+        window.lastProcessingTime = now;
+        
         // Create sidebar if it doesn't exist
         let needsCreation = true;
         
@@ -1423,7 +1454,7 @@ if (window.translatorExtensionLoaded) {
             }
         }
         
-        // Update sidebar with the selection
+        // Update sidebar with the selection - include mouse state info
         console.log("📤 Updating sidebar with selection:", word);
         updateSidebar(word, sentence, selectedText);
         console.log("📤 Sent to sidebar - Word:", word, "Sentence length:", sentence.length);
@@ -1441,6 +1472,9 @@ if (window.translatorExtensionLoaded) {
         isSelecting = false;
         isMouseDown = true;
         console.log("🖱️ Mouse down - starting selection");
+        
+        // Clear any pending processing since user is starting a new selection
+        lastSelection = "";
     });
 
     // Primary trigger for processing selections - when mouse is released
@@ -1462,23 +1496,21 @@ if (window.translatorExtensionLoaded) {
                 selectionLength: currentSelection.length,
                 rangeCount: selection.rangeCount,
                 isCollapsed: selection.isCollapsed,
-                text: currentSelection.substring(0, 50) + "..."
+                text: currentSelection.substring(0, 50) + "...",
+                isDifferentFromLast: currentSelection !== lastProcessedSelection
             });
             
-            // Process selection if we have valid content that hasn't been processed
+            // Process selection if we have valid content
             if (selection && currentSelection && 
                 selection.rangeCount > 0 && 
                 !selection.isCollapsed &&
-                currentSelection !== lastProcessedSelection) {
+                currentSelection.length >= 2) { // Minimum length
                 
                 console.log("✅ Mouse processing selection:", currentSelection.substring(0, 50) + "...");
                 processSelection(selection);
-                lastProcessedSelection = currentSelection;
                 lastSelection = currentSelection;
             } else if (!currentSelection) {
                 console.log("📝 No selection after mouse up");
-            } else if (currentSelection === lastProcessedSelection) {
-                console.log("🔄 Same selection already processed");
             }
         }, 50); // Small delay to ensure selection is stable
     });
@@ -1508,21 +1540,19 @@ if (window.translatorExtensionLoaded) {
                     selectionLength: currentSelection.length,
                     rangeCount: selection.rangeCount,
                     isCollapsed: selection.isCollapsed,
-                    text: currentSelection.substring(0, 50) + "..."
+                    text: currentSelection.substring(0, 50) + "...",
+                    isDifferentFromLast: currentSelection !== lastProcessedSelection
                 });
                 
                 // Process keyboard selections only if they're complete and valid
                 if (selection && currentSelection && 
                     selection.rangeCount > 0 && 
                     !selection.isCollapsed &&
-                    currentSelection !== lastProcessedSelection) {
+                    !isMouseDown) {
                     
                     console.log("✅ Keyboard processing selection:", currentSelection.substring(0, 50) + "...");
                     processSelection(selection);
-                    lastProcessedSelection = currentSelection;
                     lastSelection = currentSelection;
-                } else if (currentSelection === lastProcessedSelection) {
-                    console.log("🔄 Same keyboard selection already processed");
                 }
             }, 100); // Small delay for keyboard selections
         }
@@ -1592,205 +1622,175 @@ if (window.translatorExtensionLoaded) {
             return selectedText;
         }
         
-        // Get the start and end nodes
+        // Get the text node containing the selection
         const startNode = range.startContainer;
+        let textNode = startNode;
         
-        // Find the nearest paragraph or block element
-        let paragraph = startNode;
-        while (paragraph && 
-               (paragraph.nodeType === Node.TEXT_NODE ||
-                !['P', 'DIV', 'ARTICLE', 'SECTION', 'LI', 'BLOCKQUOTE', 'TD', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(paragraph.tagName))) {
-            paragraph = paragraph.parentNode;
-            if (!paragraph || paragraph === document.body) break;
-        }
-        
-        // If we found a paragraph, extract its text content
-        if (paragraph && paragraph !== document.body) {
-            console.log("📄 Found paragraph container, extracting sentence from:", paragraph.tagName);
+        // If we're in an element node, find the text node
+        if (textNode.nodeType !== Node.TEXT_NODE) {
+            // Try to find the text node within this element
+            const walker = document.createTreeWalker(
+                textNode,
+                NodeFilter.SHOW_TEXT,
+                null,
+                false
+            );
             
-            // Special handling for paragraphs with links
-            const hasLinks = paragraph.querySelector('a') !== null;
-            
-            if (hasLinks) {
-                console.log("🔗 Paragraph has links, using mixed content extraction");
-                // Find all sentences in the paragraph, preserving inline elements
-                const sentences = getSentencesFromMixedContent(paragraph);
-                
-                // Find the sentence that contains our selected text
-                for (const sentence of sentences) {
-                    if (sentence.includes(selectedText)) {
-                        console.log("✅ Found containing sentence in mixed content");
-                        return sentence.trim();
-                    }
-                }
-                
-                // If not found directly, try a more precise approach by looking at DOM proximity
-                let selectionContainer = startNode;
-                if (selectionContainer.nodeType === Node.TEXT_NODE) {
-                    selectionContainer = selectionContainer.parentNode;
-                }
-                
-                const containerText = selectionContainer.textContent;
-                const containerSentences = splitTextIntoSentences(containerText);
-                
-                for (const sentence of containerSentences) {
-                    if (sentence.includes(selectedText)) {
-                        console.log("✅ Found containing sentence in container");
-                        return sentence.trim();
-                    }
-                }
-            } else {
-                console.log("📝 Paragraph has no links, using simple extraction");
-                // No links in paragraph, simpler case
-                const paragraphText = paragraph.textContent;
-                const sentences = splitTextIntoSentences(paragraphText);
-                
-                for (const sentence of sentences) {
-                    if (sentence.includes(selectedText)) {
-                        console.log("✅ Found containing sentence in paragraph");
-                        return sentence.trim();
-                    }
-                }
+            textNode = walker.nextNode();
+            if (!textNode) {
+                console.log("⚠️ Could not find text node, using selection directly");
+                return selectedText;
             }
         }
         
-        console.log("⚠️ Using fallback sentence extraction");
+        // Get the full text content of this text node
+        const nodeText = textNode.textContent || '';
+        console.log("📄 Text node content length:", nodeText.length, "characters");
         
-        // Fallback: use the direct context around the selection
-        let parent = startNode;
-        if (parent.nodeType === Node.TEXT_NODE) {
-            parent = parent.parentNode;
-        }
-        
-        const parentText = parent.textContent;
-        
-        // Try to find the sentence containing the selection
-        const sentences = splitTextIntoSentences(parentText);
-        for (const sentence of sentences) {
-            if (sentence.includes(selectedText)) {
-                console.log("✅ Found containing sentence in parent");
-                return sentence.trim();
-            }
-        }
-        
-        // Last resort: try to extract a reasonable context around the selection
-        const selectionPos = parentText.indexOf(selectedText);
-        if (selectionPos !== -1) {
-            console.log("🔧 Using position-based extraction");
+        // Find where our selection starts in this text node
+        const selectionIndex = nodeText.indexOf(selectedText);
+        if (selectionIndex === -1) {
+            console.log("⚠️ Selection not found in text node, trying parent");
+            // Try the parent element's text
+            const parentText = textNode.parentNode.textContent || '';
+            const parentIndex = parentText.indexOf(selectedText);
             
-            // Find the beginning of the sentence
-            let sentenceStart = 0;
-            for (let i = selectionPos; i > 0; i--) {
-                if (parentText[i-1] === '.' || parentText[i-1] === '!' || parentText[i-1] === '?') {
-                    sentenceStart = i;
-                    break;
-                }
+            if (parentIndex === -1) {
+                console.log("⚠️ Selection not found in parent either, using selection directly");
+                return selectedText;
             }
             
-            // Find the end of the sentence
-            let sentenceEnd = parentText.length;
-            for (let i = selectionPos + selectedText.length; i < parentText.length; i++) {
-                if (parentText[i] === '.' || parentText[i] === '!' || parentText[i] === '?') {
-                    sentenceEnd = i + 1;
-                    break;
-                }
-            }
-            
-            const extractedSentence = parentText.substring(sentenceStart, sentenceEnd).trim();
-            console.log("✅ Extracted sentence using position method");
-            return extractedSentence;
+            return extractSentenceFromText(parentText, selectedText, parentIndex);
         }
         
-        // Ultimate fallback - just return the parent text
-        console.log("🆘 Using ultimate fallback - parent text");
-        return parentText.trim();
+        return extractSentenceFromText(nodeText, selectedText, selectionIndex);
     }
     
-    // Helper function to split text into sentences
-    function splitTextIntoSentences(text) {
-        // First, try regex split on sentence boundaries
-        const sentences = text.split(/(?<=[.!?])\s+/);
+    // Extract sentence from a given text string
+    function extractSentenceFromText(fullText, selectedText, selectionIndex) {
+        console.log("🔧 Extracting sentence from text of length:", fullText.length);
         
-        // If that produces only one result but there are clearly multiple sentences,
-        // try a simpler split on punctuation
-        if (sentences.length === 1 && (text.includes('. ') || text.includes('! ') || text.includes('? '))) {
-            const simpleSplit = [];
-            let currentSentence = '';
+        // Conservative approach: limit how far we look for sentence boundaries
+        const maxLookBack = 150;  // Maximum characters to look backwards
+        const maxLookForward = 150; // Maximum characters to look forwards
+        
+        let sentenceStart = Math.max(0, selectionIndex - maxLookBack);
+        let sentenceEnd = Math.min(fullText.length, selectionIndex + selectedText.length + maxLookForward);
+        
+        // Look backwards for sentence start (period, exclamation, question mark)
+        let foundStart = false;
+        for (let i = selectionIndex - 1; i >= sentenceStart; i--) {
+            const char = fullText[i];
             
-            for (let i = 0; i < text.length; i++) {
-                currentSentence += text[i];
-                
-                if ((text[i] === '.' || text[i] === '!' || text[i] === '?') && 
-                    (i === text.length - 1 || text[i+1] === ' ')) {
-                    simpleSplit.push(currentSentence.trim());
-                    currentSentence = '';
-                    i++; // Skip the space
+            if (char === '.' || char === '!' || char === '?') {
+                // Found potential sentence end, check if it's followed by space/newline
+                if (i + 1 < fullText.length) {
+                    const nextChar = fullText[i + 1];
+                    if (nextChar === ' ' || nextChar === '\n' || nextChar === '\t') {
+                        // Skip the punctuation and whitespace
+                        let j = i + 1;
+                        while (j < fullText.length && /\s/.test(fullText[j])) {
+                            j++;
+                        }
+                        
+                        // If we find a capital letter or we're at the start, this is sentence start
+                        if (j < fullText.length && (/[A-Z]/.test(fullText[j]) || /[0-9]/.test(fullText[j]))) {
+                            sentenceStart = j;
+                            foundStart = true;
+                            break;
+                        }
+                    }
                 }
             }
-            
-            if (currentSentence.trim()) {
-                simpleSplit.push(currentSentence.trim());
-            }
-            
-            return simpleSplit;
         }
         
-        return sentences;
+        // Look forwards for sentence end
+        let foundEnd = false;
+        for (let i = selectionIndex + selectedText.length; i < sentenceEnd; i++) {
+            const char = fullText[i];
+            
+            if (char === '.' || char === '!' || char === '?') {
+                // Check if this looks like end of sentence
+                const isEndOfText = (i === fullText.length - 1);
+                const isFollowedBySpace = (i + 1 < fullText.length && /\s/.test(fullText[i + 1]));
+                
+                if (isEndOfText || isFollowedBySpace) {
+                    // Check what comes after the space (if any)
+                    if (isEndOfText) {
+                        sentenceEnd = i + 1;
+                        foundEnd = true;
+                        break;
+                    } else {
+                        // Look ahead to see what follows
+                        let j = i + 1;
+                        while (j < fullText.length && /\s/.test(fullText[j])) {
+                            j++;
+                        }
+                        
+                        // If next non-space char is capital letter, number, or end of text, this is sentence end
+                        if (j >= fullText.length || /[A-Z0-9]/.test(fullText[j])) {
+                            sentenceEnd = i + 1;
+                            foundEnd = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        console.log("📏 Sentence boundaries found:", { 
+            start: sentenceStart, 
+            end: sentenceEnd, 
+            foundStart, 
+            foundEnd,
+            originalIndex: selectionIndex
+        });
+        
+        let extractedSentence = fullText.substring(sentenceStart, sentenceEnd).trim();
+        
+        // Safety check: if extracted sentence is too long or doesn't contain selection, use fallback
+        if (extractedSentence.length > 300 || !extractedSentence.includes(selectedText)) {
+            console.log("⚠️ Extracted sentence too long or doesn't contain selection, using conservative fallback");
+            extractedSentence = extractConservativeSentence(fullText, selectedText, selectionIndex);
+        }
+        
+        console.log("✅ Final extracted sentence:", extractedSentence.substring(0, 100) + "...");
+        return extractedSentence;
+    }
+    
+    // Very conservative fallback - just expand around selection until we hit punctuation
+    function extractConservativeSentence(fullText, selectedText, selectionIndex) {
+        console.log("🛡️ Using conservative sentence extraction");
+        
+        const maxExpansion = 100; // Don't expand more than 100 chars in each direction
+        
+        let start = selectionIndex;
+        let end = selectionIndex + selectedText.length;
+        
+        // Expand backwards, but stop at punctuation or max expansion
+        while (start > 0 && (selectionIndex - start) < maxExpansion) {
+            const prevChar = fullText[start - 1];
+            if (prevChar === '.' || prevChar === '!' || prevChar === '?') {
+                break;
+            }
+            start--;
+        }
+        
+        // Expand forwards, but stop at punctuation or max expansion  
+        while (end < fullText.length && (end - (selectionIndex + selectedText.length)) < maxExpansion) {
+            const currentChar = fullText[end];
+            if (currentChar === '.' || currentChar === '!' || currentChar === '?') {
+                end++; // Include the punctuation
+                break;
+            }
+            end++;
+        }
+        
+        const result = fullText.substring(start, end).trim();
+        console.log("🛡️ Conservative result:", result.substring(0, 100) + "...");
+        return result;
     }
 
-    // Function to extract sentences from mixed content (text nodes and elements like links)
-    function getSentencesFromMixedContent(element) {
-        // Create a normalized version of the content that preserves sentence structure
-        // but merges text across different nodes
-        let fullText = '';
-        const textNodes = [];
-        
-        // Get all text nodes in the element
-        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-        let node;
-        while (node = walker.nextNode()) {
-            textNodes.push(node);
-            fullText += node.textContent + ' ';
-        }
-        
-        fullText = decodeHtmlEntities(fullText.trim());
-        
-        // If the element contains link elements, we need special handling
-        if (element.querySelector('a')) {
-            // Get the raw HTML as a string
-            const html = element.innerHTML;
-            
-            // Simple parsing approach: build the text without HTML tags
-            let plainText = '';
-            let inTag = false;
-            
-            for (let i = 0; i < html.length; i++) {
-                if (html[i] === '<') {
-                    inTag = true;
-                    continue;
-                }
-                
-                if (html[i] === '>') {
-                    inTag = false;
-                    continue;
-                }
-                
-                if (!inTag) {
-                    plainText += html[i];
-                }
-            }
-            
-            // Decode HTML entities in the plain text
-            plainText = decodeHtmlEntities(plainText);
-            
-            // Split the plainText into sentences
-            return splitTextIntoSentences(plainText);
-        }
-        
-        // Regular case - just split the full text
-        return splitTextIntoSentences(fullText);
-    }
-    
     // Listen for messages from the sidebar iframe
     window.addEventListener('message', (event) => {
         // Only handle messages from our sidebar

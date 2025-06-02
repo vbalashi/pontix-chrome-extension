@@ -81,6 +81,58 @@ const providerNames = {
     gemini: "Gemini"
 };
 
+// Debounce variables for translation requests
+let translationDebounceTimer = null;
+const TRANSLATION_DEBOUNCE_DELAY = 500; // 500ms delay after last selection change
+
+// Debounced version of translateAllBoxes to prevent rapid-fire requests
+function debouncedTranslateAllBoxes() {
+    // Clear any existing timer
+    if (translationDebounceTimer) {
+        clearTimeout(translationDebounceTimer);
+    }
+    
+    // Set a new timer
+    translationDebounceTimer = setTimeout(() => {
+        console.log("🎯 Debounced translation triggered after user finished selecting");
+        translateAllBoxes();
+        translationDebounceTimer = null;
+    }, TRANSLATION_DEBOUNCE_DELAY);
+    
+    console.log("⏱️ Translation request debounced, waiting for user to finish selecting...");
+}
+
+// Rate limiting queue for Gemini API
+let geminiRequestQueue = [];
+let geminiRequestInProgress = false;
+const GEMINI_REQUEST_DELAY = 1000; // 1 second delay between requests
+
+// Process Gemini request queue
+function processGeminiQueue() {
+    if (geminiRequestInProgress || geminiRequestQueue.length === 0) {
+        return;
+    }
+    
+    geminiRequestInProgress = true;
+    const request = geminiRequestQueue.shift();
+    
+    // Execute the request
+    request.execute()
+        .finally(() => {
+            geminiRequestInProgress = false;
+            // Process next request after delay
+            setTimeout(() => {
+                processGeminiQueue();
+            }, GEMINI_REQUEST_DELAY);
+        });
+}
+
+// Add request to Gemini queue
+function queueGeminiRequest(requestFunction) {
+    geminiRequestQueue.push({ execute: requestFunction });
+    processGeminiQueue();
+}
+
 // ====================
 // PROFILE MANAGEMENT
 // ====================
@@ -978,8 +1030,9 @@ function handleContentScriptMessage(event) {
     if (data && data.type === "translateWord") {
         currentWord = data.word || "";
         currentSentence = data.sentence || "";
+        const isMouseDown = data.isMouseDown || false;
         
-        // Update UI
+        // Update UI immediately
         if (selectionElement) {
             selectionElement.textContent = currentWord;
         }
@@ -987,8 +1040,21 @@ function handleContentScriptMessage(event) {
             sentenceElement.textContent = currentSentence;
         }
         
-        // Translate in all boxes
-        translateAllBoxes();
+        // Only trigger translation if mouse is not down (user finished selecting)
+        if (isMouseDown) {
+            console.log("🖱️ Mouse still down, not triggering translation yet");
+            // Clear any pending translation since user is still selecting
+            if (translationDebounceTimer) {
+                clearTimeout(translationDebounceTimer);
+                translationDebounceTimer = null;
+            }
+            return;
+        }
+        
+        // Use debounced translation to prevent rapid-fire API requests
+        // This will wait 500ms after the last selection change before translating
+        console.log("✅ Mouse released, triggering debounced translation");
+        debouncedTranslateAllBoxes();
     }
 }
 
@@ -2040,45 +2106,54 @@ function translateWithGemini(word, sentence, targetLang, boxElement) {
     console.log('- Full request payload:', requestPayload);
     console.log('- API URL:', url.replace(apiKey, '[API_KEY_HIDDEN]'));
     
-    fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestPayload)
-    })
-    .then(response => {
-        if (!response.ok) {
-            throw new Error('Translation API error');
-        }
-        return response.json();
-    })
-    .then(data => {
-        // Debug: Log the full response received
-        console.log('💎 Gemini Response received:', data);
+    // Use the queue system to prevent rate limiting
+    const geminiRequest = () => {
+        console.log('🚀 Executing queued Gemini request');
         
-        // Hide loading
-        loadingIndicator.classList.add('hidden');
-        
-        // Check for valid response
-        if (data.candidates && data.candidates.length > 0 && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts.length > 0) {
-            const translatedText = data.candidates[0].content.parts[0].text.trim();
+        return fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestPayload)
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Translation API error');
+            }
+            return response.json();
+        })
+        .then(data => {
+            // Debug: Log the full response received
+            console.log('💎 Gemini Response received:', data);
             
-            // Debug: Log the extracted translation
-            console.log('💎 Gemini Translation result:', translatedText);
-            console.log('💎 Gemini Usage metadata:', data.usageMetadata);
-            console.log('💎 Gemini Safety ratings:', data.candidates[0].safetyRatings);
+            // Hide loading
+            loadingIndicator.classList.add('hidden');
             
-            translationText.textContent = translatedText;
-        } else {
-            console.error('💎 Gemini Invalid response structure:', data);
-            throw new Error('Invalid translation response');
-        }
-    })
-    .catch(error => {
-        console.error('💎 Gemini Translation error:', error);
-        showTranslationError(boxElement, "Translation failed. Please check your API key and try again.");
-    });
+            // Check for valid response
+            if (data.candidates && data.candidates.length > 0 && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts.length > 0) {
+                const translatedText = data.candidates[0].content.parts[0].text.trim();
+                
+                // Debug: Log the extracted translation
+                console.log('💎 Gemini Translation result:', translatedText);
+                console.log('💎 Gemini Usage metadata:', data.usageMetadata);
+                console.log('💎 Gemini Safety ratings:', data.candidates[0].safetyRatings);
+                
+                translationText.textContent = translatedText;
+            } else {
+                console.error('💎 Gemini Invalid response structure:', data);
+                throw new Error('Invalid translation response');
+            }
+        })
+        .catch(error => {
+            console.error('💎 Gemini Translation error:', error);
+            showTranslationError(boxElement, "Translation failed. Please check your API key and try again.");
+        });
+    };
+    
+    // Add the request to the queue instead of executing immediately
+    console.log('📋 Adding Gemini request to queue to prevent rate limiting');
+    queueGeminiRequest(geminiRequest);
 }
 
 // Show translation error
