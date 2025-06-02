@@ -26,7 +26,10 @@ let settings = {
         openai: "",
         claude: ""
     },
-    defaultTargetLanguage: "ru"
+    defaultTargetLanguage: "ru",
+    translationBoxes: [
+        { provider: "google", targetLanguage: "ru" }
+    ]
 };
 
 // Current state
@@ -57,36 +60,153 @@ const providerNames = {
 
 // Initialize the sidebar
 function initializeSidebar() {
-    // Load saved settings
-    loadSettings();
+    console.log('=== SIDEBAR INITIALIZATION START ===');
+    console.log('DOM loaded, starting sidebar initialization...');
     
-    // Setup event listeners
+    // Setup event listeners first
+    console.log('Setting up event listeners...');
     setupEventListeners();
     
-    // If there are no translation boxes, add the default one (Google)
-    if (translationsContainer.children.length === 0) {
-        addTranslationBox("google", settings.defaultTargetLanguage);
-    }
+    // Load saved settings (this will also restore translation boxes)
+    console.log('Loading settings...');
+    loadSettings();
+    
+    console.log('=== SIDEBAR INITIALIZATION COMPLETE ===');
 }
 
 // Load settings from storage
 function loadSettings() {
+    console.log('LoadSettings: Attempting to load settings from chrome.storage...');
+    
+    if (typeof chrome === 'undefined' || !chrome.storage) {
+        console.error('LoadSettings: Chrome storage API not available!');
+        console.log('LoadSettings: Using default settings and restoring boxes...');
+        updateSettingsUI();
+        restoreTranslationBoxes();
+        return;
+    }
+    
     chrome.storage.sync.get("translatorSettings", (result) => {
-        if (result.translatorSettings) {
-            settings = result.translatorSettings;
+        console.log('LoadSettings: Storage query result:', result);
+        
+        if (chrome.runtime.lastError) {
+            console.error('LoadSettings: Chrome runtime error:', chrome.runtime.lastError);
             updateSettingsUI();
+            restoreTranslationBoxes();
+            return;
+        }
+        
+        if (result.translatorSettings) {
+            console.log('LoadSettings: Found saved settings:', result.translatorSettings);
+            settings = result.translatorSettings;
+            
+            // Ensure translationBoxes array exists
+            if (!settings.translationBoxes) {
+                console.log('LoadSettings: No translationBoxes in saved settings, creating default...');
+                settings.translationBoxes = [{ provider: "google", targetLanguage: "ru" }];
+            }
+            
+            console.log('LoadSettings: Translation boxes to restore:', settings.translationBoxes);
+            updateSettingsUI();
+            
+            // Now restore translation boxes with the loaded settings
+            console.log('LoadSettings: Now restoring translation boxes...');
+            restoreTranslationBoxes();
         } else {
+            console.log('LoadSettings: No saved settings found, using defaults...');
             // Save default settings if none exist
             saveSettings();
+            
+            // Restore default translation boxes
+            console.log('LoadSettings: Restoring default translation boxes...');
+            restoreTranslationBoxes();
         }
     });
 }
 
 // Save settings to storage
 function saveSettings() {
+    // Save current translation boxes layout
+    saveTranslationBoxesLayout();
+    
     chrome.storage.sync.set({ translatorSettings: settings }, () => {
         console.log("Settings saved");
     });
+}
+
+// Save current translation boxes layout
+function saveTranslationBoxesLayout() {
+    const boxes = document.querySelectorAll('.translation-box');
+    settings.translationBoxes = [];
+    
+    boxes.forEach(box => {
+        const provider = box.getAttribute('data-provider');
+        const langSelect = box.querySelector('.language-select');
+        const targetLanguage = langSelect ? langSelect.value : settings.defaultTargetLanguage;
+        
+        settings.translationBoxes.push({
+            provider: provider,
+            targetLanguage: targetLanguage
+        });
+    });
+    
+    console.log('Saved translation boxes layout:', settings.translationBoxes);
+}
+
+// Restore saved translation boxes
+function restoreTranslationBoxes() {
+    console.log('=== RESTORE TRANSLATION BOXES START ===');
+    console.log('Current settings object:', settings);
+    console.log('Translation boxes to restore:', settings.translationBoxes);
+    console.log('Enabled providers:', settings.enabledProviders);
+    
+    // Clear existing boxes first
+    const existingBoxes = translationsContainer.querySelectorAll('.translation-box').length;
+    console.log('Clearing existing boxes, found:', existingBoxes);
+    translationsContainer.innerHTML = '';
+    
+    // If no saved boxes or empty array, add default Google box
+    if (!settings.translationBoxes || settings.translationBoxes.length === 0) {
+        console.log('No saved translation boxes, adding default Google box');
+        addTranslationBox("google", settings.defaultTargetLanguage);
+        console.log('=== RESTORE TRANSLATION BOXES COMPLETE (DEFAULT) ===');
+        return;
+    }
+    
+    console.log('Restoring saved translation boxes:', settings.translationBoxes);
+    
+    let restoredCount = 0;
+    
+    // Restore each saved box
+    settings.translationBoxes.forEach((boxConfig, index) => {
+        console.log(`Processing box ${index}:`, boxConfig);
+        
+        // Check if provider exists in enabledProviders
+        if (!settings.enabledProviders.hasOwnProperty(boxConfig.provider)) {
+            console.warn(`Provider ${boxConfig.provider} not found in enabledProviders, skipping`);
+            return;
+        }
+        
+        // Only restore if the provider is still enabled
+        if (settings.enabledProviders[boxConfig.provider]) {
+            console.log(`Restoring box for ${boxConfig.provider} with language ${boxConfig.targetLanguage}`);
+            addTranslationBox(boxConfig.provider, boxConfig.targetLanguage);
+            restoredCount++;
+        } else {
+            console.log(`Skipping disabled provider: ${boxConfig.provider}`);
+        }
+    });
+    
+    console.log(`Restored ${restoredCount} translation boxes`);
+    
+    // If no boxes were restored (all providers disabled), add default Google box
+    if (translationsContainer.children.length === 0) {
+        console.log('No enabled providers found, adding default Google box');
+        addTranslationBox("google", settings.defaultTargetLanguage);
+    }
+    
+    console.log('Final box count:', translationsContainer.children.length);
+    console.log('=== RESTORE TRANSLATION BOXES COMPLETE ===');
 }
 
 // Update settings UI
@@ -136,6 +256,10 @@ function setupEventListeners() {
         }
         
         addTranslationBox(nextProvider, settings.defaultTargetLanguage);
+        
+        // Save the updated layout
+        saveTranslationBoxesLayout();
+        saveSettings();
     });
     
     // Global settings button
@@ -222,6 +346,10 @@ function handleTranslationsContainerClick(event) {
         const box = event.target.closest('.translation-box');
         if (translationsContainer.querySelectorAll('.translation-box').length > 1) {
             box.remove();
+            
+            // Save the updated layout
+            saveTranslationBoxesLayout();
+            saveSettings();
         } else {
             // Don't remove the last box, just reset it
             const provider = box.getAttribute('data-provider');
@@ -254,6 +382,10 @@ function handleTranslationsContainerChange(event) {
         
         // Translate with new provider
         translateText(box, newProvider, targetLang);
+        
+        // Save the updated layout
+        saveTranslationBoxesLayout();
+        saveSettings();
     }
     
     // Language selection change
@@ -271,6 +403,10 @@ function handleTranslationsContainerChange(event) {
         
         // Translate with new language
         translateText(box, provider, targetLang);
+        
+        // Save the updated layout
+        saveTranslationBoxesLayout();
+        saveSettings();
     }
 }
 
@@ -445,6 +581,9 @@ function refreshTranslationBoxes() {
             }
         }
     });
+    
+    // Save the updated layout
+    saveTranslationBoxesLayout();
 }
 
 // Get the first enabled provider
@@ -917,4 +1056,45 @@ function showTranslationError(boxElement, errorMessage) {
 }
 
 // Initialize when DOM is fully loaded
-document.addEventListener("DOMContentLoaded", initializeSidebar);
+document.addEventListener("DOMContentLoaded", () => {
+    console.log('DOMContentLoaded event fired');
+    initializeSidebar();
+});
+
+// Fallback initialization in case DOMContentLoaded already fired
+if (document.readyState === 'loading') {
+    console.log('Document still loading, waiting for DOMContentLoaded');
+} else {
+    console.log('Document already loaded, initializing immediately');
+    initializeSidebar();
+}
+
+// Debug function to inspect current state (call from console)
+window.debugTranslator = function() {
+    console.log('=== TRANSLATOR DEBUG INFO ===');
+    console.log('Current settings:', settings);
+    console.log('Translation boxes in DOM:', translationsContainer.children.length);
+    console.log('DOM boxes:', Array.from(translationsContainer.children).map(box => ({
+        provider: box.getAttribute('data-provider'),
+        language: box.querySelector('.language-select')?.value
+    })));
+    
+    // Check storage directly
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+        chrome.storage.sync.get("translatorSettings", (result) => {
+            console.log('Storage contents:', result);
+        });
+    } else {
+        console.log('Chrome storage not available');
+    }
+    
+    console.log('=== END DEBUG INFO ===');
+};
+
+// Auto-call debug function after a short delay for immediate insight
+setTimeout(() => {
+    if (window.debugTranslator) {
+        console.log('Auto-running debug after initialization...');
+        window.debugTranslator();
+    }
+}, 2000);
