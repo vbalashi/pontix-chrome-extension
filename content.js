@@ -205,7 +205,7 @@ function createSidebar() {
     }
     
     // Function to update data in sidebar
-function updateSidebar(word, sentence) {
+function updateSidebar(word, sentence, selectedText = "") {
     // Clean HTML entities from sentence before sending
     sentence = decodeHtmlEntities(sentence);
         
@@ -213,19 +213,19 @@ function updateSidebar(word, sentence) {
     const sidebar = document.getElementById("translator-sidebar");
     if (sidebar) {
         try {
-            sidebar.contentWindow.postMessage({ word, sentence }, "*");
+            sidebar.contentWindow.postMessage({ word, sentence, selectedText }, "*");
         } catch (e) {
             console.log("Error posting message to iframe:", e);
                 
             // If posting to iframe fails, try the alternative approach
-            updateSidebarAlternative(word, sentence);
+            updateSidebarAlternative(word, sentence, selectedText);
                 
             // Check if we need to recreate the sidebar
             ensureSidebarLoaded();
         }
     } else {
         // If iframe doesn't exist, check for alternative container
-        updateSidebarAlternative(word, sentence);
+        updateSidebarAlternative(word, sentence, selectedText);
     }
 }
     
@@ -338,15 +338,15 @@ function updateSidebar(word, sentence) {
     }
     
     // Function to update data when using direct HTML injection approach
-    function updateSidebarAlternative(word, sentence) {
+    function updateSidebarAlternative(word, sentence, selectedText = "") {
         const container = document.getElementById("translator-sidebar-container");
         
         if (container) {
-            const wordElement = container.querySelector("#word");
             const sentenceElement = container.querySelector("#sentence");
+            const selectionElement = container.querySelector("#selection");
             
-            if (wordElement) wordElement.textContent = word;
             if (sentenceElement) sentenceElement.textContent = sentence;
+            if (selectionElement) selectionElement.textContent = selectedText || "No selection";
         }
     }
     
@@ -363,12 +363,50 @@ function updateSidebar(word, sentence) {
         };
     }
 
-    // Handle text selection to get words and context
-    document.addEventListener("mouseup", debounce((event) => {
-        // Only process selection if sidebar is enabled
+    // Variables to track selection state
+    let selectionTimeout;
+    let lastSelection = "";
+    let isSelecting = false;
+    let lastProcessedSelection = "";
+
+    // Handle text selection changes - this fires during selection
+    function handleSelectionChange() {
         if (!sidebarEnabled) return;
         
         const selection = window.getSelection();
+        const currentSelection = selection.toString().trim();
+        
+        // Clear any existing timeout
+        if (selectionTimeout) {
+            clearTimeout(selectionTimeout);
+        }
+        
+        // If there's no selection, clear everything
+        if (!currentSelection) {
+            lastSelection = "";
+            isSelecting = false;
+            return;
+        }
+        
+        // If selection changed, we're still selecting
+        if (currentSelection !== lastSelection) {
+            isSelecting = true;
+            lastSelection = currentSelection;
+            
+            // Set a timeout to process the selection after user stops changing it
+            selectionTimeout = setTimeout(() => {
+                // Only process if this selection is different from the last processed one
+                if (currentSelection !== lastProcessedSelection) {
+                    processSelection(selection);
+                    lastProcessedSelection = currentSelection;
+                }
+                isSelecting = false;
+            }, 500); // Wait 500ms after selection stops changing
+        }
+    }
+
+    // Process the final selection
+    function processSelection(selection) {
         if (!selection || selection.toString().trim() === "") return;
         
         // Get the selected word and clean it to avoid punctuation
@@ -377,7 +415,7 @@ function updateSidebar(word, sentence) {
         word = word.replace(/[.,;:!?)"'\]]+$/, '').replace(/^[("'\[]+/, '');
         
         // Don't process if selection is too long to be a word or short phrase
-        if (word.split(/\s+/).length > 5) return;
+        if (word.split(/\s+/).length > 10) return; // Increased limit to allow longer phrases
         
         // Get just the sentence containing the selection
         const sentence = extractSentence(selection);
@@ -407,9 +445,25 @@ function updateSidebar(word, sentence) {
             }
         }
         
-        // Send data to sidebar
-        updateSidebar(word, sentence);
-    }, 300));
+        // Send data to sidebar with the selected text
+        updateSidebar(word, sentence, selection.toString().trim());
+    }
+
+    // Listen for selection changes
+    document.addEventListener("selectionchange", handleSelectionChange);
+
+    // Also listen for mouseup as a fallback for immediate single clicks
+    document.addEventListener("mouseup", debounce((event) => {
+        // Only process if we're not in the middle of a selection change
+        if (!isSelecting) {
+            const selection = window.getSelection();
+            const currentSelection = selection.toString().trim();
+            if (selection && currentSelection && currentSelection !== lastProcessedSelection) {
+                processSelection(selection);
+                lastProcessedSelection = currentSelection;
+            }
+        }
+    }, 100));
     
     // Helper function to get normalized text from DOM elements, handling links better
     function getTextFromContainer(container) {

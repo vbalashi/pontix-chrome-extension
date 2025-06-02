@@ -1,5 +1,5 @@
 // DOM Elements
-const wordElement = document.getElementById("word");
+const selectionElement = document.getElementById("selection");
 const sentenceElement = document.getElementById("sentence");
 const translationsContainer = document.getElementById("translations-container");
 const addTranslationButton = document.getElementById("add-translation-button");
@@ -184,7 +184,7 @@ function handleContentScriptMessage(event) {
     if (!event.data || !event.data.word) return;
     
     // Update the UI with new word and context
-    wordElement.textContent = event.data.word;
+    selectionElement.textContent = event.data.selectedText || "No selection";
     sentenceElement.textContent = event.data.sentence || "";
     
     // Store current word and sentence
@@ -541,9 +541,23 @@ function translateWithGoogle(word, sentence, targetLang, boxElement) {
 function translateWithDeepL(word, sentence, targetLang, boxElement) {
     const apiKey = settings.apiKeys.deepl;
     
+    console.log('DeepL Translation Debug:');
+    console.log('- API Key present:', !!apiKey);
+    console.log('- API Key length:', apiKey ? apiKey.length : 0);
+    console.log('- API Key starts with:', apiKey ? apiKey.substring(0, 8) + '...' : 'N/A');
+    console.log('- Word to translate:', word);
+    console.log('- Target language:', targetLang);
+    console.log('- Target language (uppercase):', targetLang.toUpperCase());
+    
     if (!apiKey) {
+        console.error('DeepL: No API key provided');
         showTranslationError(boxElement, "API key required for DeepL. Please add your API key in settings.");
         return;
+    }
+    
+    // Validate API key format (DeepL keys end with :fx for free tier)
+    if (!apiKey.includes(':')) {
+        console.warn('DeepL: API key might be invalid - DeepL keys typically contain a colon');
     }
     
     const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
@@ -552,37 +566,82 @@ function translateWithDeepL(word, sentence, targetLang, boxElement) {
     // Show loading indicator
     loadingIndicator.classList.remove('hidden');
     
-    // Call the DeepL API
-    const url = 'https://api-free.deepl.com/v2/translate';
-    const formData = new FormData();
-    formData.append('auth_key', apiKey);
-    formData.append('text', word);
-    formData.append('target_lang', targetLang.toUpperCase());
+    // Determine the correct API endpoint based on key type
+    const isFreeKey = apiKey.endsWith(':fx');
+    const url = isFreeKey ? 'https://api-free.deepl.com/v2/translate' : 'https://api.deepl.com/v2/translate';
+    
+    // Prepare request body as JSON (new format)
+    const requestBody = {
+        text: [word],
+        target_lang: targetLang.toUpperCase()
+    };
+    
+    console.log('DeepL: Using API endpoint:', url);
+    console.log('DeepL: API key type:', isFreeKey ? 'Free' : 'Pro');
+    console.log('DeepL: Request body:', requestBody);
+    console.log('DeepL: Authorization header:', `DeepL-Auth-Key ${apiKey.substring(0, 8)}...`);
     
     fetch(url, {
         method: 'POST',
-        body: formData
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `DeepL-Auth-Key ${apiKey}`
+        },
+        body: JSON.stringify(requestBody)
     })
     .then(response => {
+        console.log('DeepL: Response status:', response.status);
+        console.log('DeepL: Response headers:', Object.fromEntries(response.headers.entries()));
+        
         if (!response.ok) {
-            throw new Error('Translation API error');
+            return response.text().then(errorText => {
+                console.error('DeepL: Error response body:', errorText);
+                
+                // Parse common DeepL error messages
+                let userFriendlyMessage = 'Translation failed. ';
+                if (response.status === 403) {
+                    userFriendlyMessage += 'Invalid API key or authorization failed.';
+                } else if (response.status === 456) {
+                    userFriendlyMessage += 'Quota exceeded.';
+                } else if (response.status === 400) {
+                    userFriendlyMessage += 'Bad request - check target language.';
+                } else {
+                    userFriendlyMessage += `HTTP ${response.status}: ${errorText}`;
+                }
+                
+                throw new Error(userFriendlyMessage);
+            });
         }
         return response.json();
     })
     .then(data => {
+        console.log('DeepL: Success response:', data);
+        
         // Hide loading
         loadingIndicator.classList.add('hidden');
         
         // Check for valid response
         if (data.translations && data.translations.length > 0) {
-            translationText.textContent = data.translations[0].text;
+            const translation = data.translations[0].text;
+            console.log('DeepL: Translation result:', translation);
+            translationText.textContent = translation;
         } else {
+            console.error('DeepL: Invalid response structure:', data);
             throw new Error('Invalid translation response');
         }
     })
     .catch(error => {
-        console.error('Translation error:', error);
-        showTranslationError(boxElement, "Translation failed. Please check your API key and try again.");
+        console.error('DeepL: Translation error:', error);
+        console.error('DeepL: Error details:', {
+            message: error.message,
+            stack: error.stack
+        });
+        
+        // Hide loading
+        loadingIndicator.classList.add('hidden');
+        
+        // Show user-friendly error
+        showTranslationError(boxElement, error.message);
     });
 }
 
