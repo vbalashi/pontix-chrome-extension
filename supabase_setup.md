@@ -98,6 +98,45 @@ CREATE TRIGGER update_user_settings_updated_at BEFORE UPDATE ON user_settings
 4. Configure email templates if needed
 5. Set Site URL to your extension's origin (we'll handle this in code)
 
+### Configure Email Templates for Chrome Extension
+
+**Important**: Chrome extensions require special email template configuration to avoid redirect issues.
+
+1. Go to Authentication > Email Templates in your Supabase dashboard
+2. For the **Magic Link** template, modify it to use OTP instead:
+
+```html
+<h2>Confirm your account</h2>
+<p>Your verification code is:</p>
+<h1 style="font-size: 36px; color: #1a73e8; text-align: center; letter-spacing: 4px;">{{ .Token }}</h1>
+<p>This code will expire in 1 hour.</p>
+<p>If you didn't request this, you can safely ignore this email.</p>
+```
+
+3. For the **Invite User** template (if using invitations):
+
+```html
+<h2>You have been invited</h2>
+<p>Your verification code is:</p>
+<h1 style="font-size: 36px; color: #1a73e8; text-align: center; letter-spacing: 4px;">{{ .Token }}</h1>
+<p>This code will expire in 1 hour.</p>
+```
+
+4. For the **Reset Password** template:
+
+```html
+<h2>Reset your password</h2>
+<p>Your password reset code is:</p>
+<h1 style="font-size: 36px; color: #1a73e8; text-align: center; letter-spacing: 4px;">{{ .Token }}</h1>
+<p>This code will expire in 1 hour.</p>
+<p>If you didn't request this, you can safely ignore this email.</p>
+```
+
+**Why use OTP for Chrome Extensions?**
+- Email confirmation links redirect to web URLs, which don't work in Chrome extensions
+- OTP codes can be entered directly in the extension UI
+- More secure and user-friendly for extension environments
+
 ## 4. Get Project Credentials
 
 1. Go to Settings > API in your Supabase dashboard

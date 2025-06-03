@@ -15,6 +15,15 @@ const SUPABASE_CONFIG = {
     // ✅ Configuration completed with your Supabase project credentials
 };
 
+// Get extension ID for redirect URL
+function getExtensionRedirectUrl() {
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id) {
+        return `chrome-extension://${chrome.runtime.id}/sidebar.html`;
+    }
+    // Fallback for development
+    return 'http://localhost:3000';
+}
+
 // Initialize Supabase client
 let supabaseClient = null;
 
@@ -95,6 +104,10 @@ async function signUp(email, password) {
         const { data, error } = await client.auth.signUp({
             email: email,
             password: password,
+            options: {
+                // Use extension URL for email confirmation
+                emailRedirectTo: getExtensionRedirectUrl()
+            }
         });
         
         if (error) {
@@ -130,6 +143,108 @@ async function signIn(email, password) {
     } catch (err) {
         console.error('Sign in exception:', err);
         return { error: 'Sign in failed' };
+    }
+}
+
+// New function to handle email verification with OTP
+async function verifyEmailOtp(email, token) {
+    const client = getSupabaseClient();
+    if (!client) return { error: 'Supabase client not available' };
+    
+    try {
+        const { data, error } = await client.auth.verifyOtp({
+            email: email,
+            token: token,
+            type: 'signup'
+        });
+        
+        if (error) {
+            console.error('Email verification error:', error);
+            return { error: error.message };
+        }
+        
+        console.log('Email verification successful:', data);
+        return { data, error: null };
+    } catch (err) {
+        console.error('Email verification exception:', err);
+        return { error: 'Email verification failed' };
+    }
+}
+
+// Alternative sign up with OTP (recommended for Chrome extensions)
+async function signUpWithOtp(email) {
+    const client = getSupabaseClient();
+    if (!client) return { error: 'Supabase client not available' };
+    
+    try {
+        const { data, error } = await client.auth.signInWithOtp({
+            email: email,
+            options: {
+                shouldCreateUser: true
+            }
+        });
+        
+        if (error) {
+            console.error('Sign up with OTP error:', error);
+            return { error: error.message };
+        }
+        
+        console.log('Sign up with OTP successful - check email for verification code');
+        return { data, error: null };
+    } catch (err) {
+        console.error('Sign up with OTP exception:', err);
+        return { error: 'Sign up with OTP failed' };
+    }
+}
+
+// Sign in with OTP
+async function signInWithOtp(email) {
+    const client = getSupabaseClient();
+    if (!client) return { error: 'Supabase client not available' };
+    
+    try {
+        const { data, error } = await client.auth.signInWithOtp({
+            email: email,
+            options: {
+                shouldCreateUser: false
+            }
+        });
+        
+        if (error) {
+            console.error('Sign in with OTP error:', error);
+            return { error: error.message };
+        }
+        
+        console.log('Sign in with OTP successful - check email for verification code');
+        return { data, error: null };
+    } catch (err) {
+        console.error('Sign in with OTP exception:', err);
+        return { error: 'Sign in with OTP failed' };
+    }
+}
+
+// Verify OTP for sign in
+async function verifyOtp(email, token, type = 'email') {
+    const client = getSupabaseClient();
+    if (!client) return { error: 'Supabase client not available' };
+    
+    try {
+        const { data, error } = await client.auth.verifyOtp({
+            email: email,
+            token: token,
+            type: type
+        });
+        
+        if (error) {
+            console.error('OTP verification error:', error);
+            return { error: error.message };
+        }
+        
+        console.log('OTP verification successful:', data);
+        return { data, error: null };
+    } catch (err) {
+        console.error('OTP verification exception:', err);
+        return { error: 'OTP verification failed' };
     }
 }
 
@@ -352,7 +467,11 @@ window.SupabaseAuth = {
     initializeSupabase,
     getSupabaseClient,
     signUp,
+    signUpWithOtp,
     signIn,
+    signInWithOtp,
+    verifyOtp,
+    verifyEmailOtp,
     signOut,
     getCurrentUser,
     getCurrentSession,

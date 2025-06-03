@@ -42,10 +42,38 @@ const signinMessage = document.getElementById("signin-message");
 const signupMessage = document.getElementById("signup-message");
 const syncMessage = document.getElementById("sync-message");
 
+// OTP-related DOM elements
+const signupOtpButton = document.getElementById("signup-otp-button");
+const signinOtpButton = document.getElementById("signin-otp-button");
+const signupOtpForm = document.getElementById("signup-otp-form");
+const signinOtpForm = document.getElementById("signin-otp-form");
+const otpVerifyForm = document.getElementById("otp-verify-form");
+const signupOtpSend = document.getElementById("signup-otp-send");
+const signupOtpCancel = document.getElementById("signup-otp-cancel");
+const signinOtpSend = document.getElementById("signin-otp-send");
+const signinOtpCancel = document.getElementById("signin-otp-cancel");
+const otpVerifySubmit = document.getElementById("otp-verify-submit");
+const otpVerifyCancel = document.getElementById("otp-verify-cancel");
+const otpResend = document.getElementById("otp-resend");
+const signupOtpMessage = document.getElementById("signup-otp-message");
+const signinOtpMessage = document.getElementById("signin-otp-message");
+const otpVerifyMessage = document.getElementById("otp-verify-message");
+
+// Advanced auth DOM elements
+const showAdvancedAuth = document.getElementById("show-advanced-auth");
+const authAdvancedOptions = document.getElementById("auth-advanced-options");
+const showSigninPassword = document.getElementById("show-signin-password");
+const showSignupPassword = document.getElementById("show-signup-password");
+const advancedAuthCancel = document.getElementById("advanced-auth-cancel");
+
 // Auth state management
 let isAuthenticated = false;
 let currentUser = null;
 let syncEnabled = false;
+
+// OTP state management
+let otpEmail = '';
+let otpType = ''; // 'signup' or 'signin'
 
 // Default settings
 let settings = {
@@ -347,6 +375,150 @@ async function handleSignOut() {
     }
 }
 
+// Handle sign up with OTP
+async function handleSignUpWithOtp() {
+    const email = document.getElementById('signup-otp-email')?.value;
+    
+    if (!email) {
+        showAuthMessage(signupOtpMessage, 'Please enter your email.', 'error');
+        return;
+    }
+    
+    try {
+        showAuthMessage(signupOtpMessage, 'Sending verification code...', 'info');
+        signupOtpSend.disabled = true;
+        
+        const { data, error } = await window.SupabaseAuth.signUpWithOtp(email);
+        
+        if (error) {
+            showAuthMessage(signupOtpMessage, error, 'error');
+        } else {
+            showAuthMessage(signupOtpMessage, 'Verification code sent! Check your email.', 'success');
+            
+            // Store email and type for verification
+            otpEmail = email;
+            otpType = 'signup';
+            
+            // Show OTP verification form
+            setTimeout(() => {
+                showOtpVerifyForm();
+            }, 1500);
+        }
+    } catch (err) {
+        console.error('🔐 Sign up with OTP error:', err);
+        showAuthMessage(signupOtpMessage, 'Failed to send verification code. Please try again.', 'error');
+    } finally {
+        signupOtpSend.disabled = false;
+    }
+}
+
+// Handle sign in with OTP
+async function handleSignInWithOtp() {
+    const email = document.getElementById('signin-otp-email')?.value;
+    
+    if (!email) {
+        showAuthMessage(signinOtpMessage, 'Please enter your email.', 'error');
+        return;
+    }
+    
+    try {
+        showAuthMessage(signinOtpMessage, 'Sending verification code...', 'info');
+        signinOtpSend.disabled = true;
+        
+        const { data, error } = await window.SupabaseAuth.signInWithOtp(email);
+        
+        if (error) {
+            showAuthMessage(signinOtpMessage, error, 'error');
+        } else {
+            showAuthMessage(signinOtpMessage, 'Verification code sent! Check your email.', 'success');
+            
+            // Store email and type for verification
+            otpEmail = email;
+            otpType = 'signin';
+            
+            // Show OTP verification form
+            setTimeout(() => {
+                showOtpVerifyForm();
+            }, 1500);
+        }
+    } catch (err) {
+        console.error('🔐 Sign in with OTP error:', err);
+        showAuthMessage(signinOtpMessage, 'Failed to send verification code. Please try again.', 'error');
+    } finally {
+        signinOtpSend.disabled = false;
+    }
+}
+
+// Handle OTP verification
+async function handleOtpVerification() {
+    const code = document.getElementById('otp-code')?.value;
+    
+    if (!code || code.length !== 6) {
+        showAuthMessage(otpVerifyMessage, 'Please enter a valid 6-digit code.', 'error');
+        return;
+    }
+    
+    try {
+        showAuthMessage(otpVerifyMessage, 'Verifying code...', 'info');
+        otpVerifySubmit.disabled = true;
+        
+        const { data, error } = await window.SupabaseAuth.verifyOtp(otpEmail, code, 'email');
+        
+        if (error) {
+            showAuthMessage(otpVerifyMessage, error, 'error');
+        } else {
+            showAuthMessage(otpVerifyMessage, 'Verification successful!', 'success');
+            
+            // Clear OTP form
+            document.getElementById('otp-code').value = '';
+            
+            // Update auth status
+            await checkAuthStatus();
+            
+            // Hide form
+            hideAuthForms();
+        }
+    } catch (err) {
+        console.error('🔐 OTP verification error:', err);
+        showAuthMessage(otpVerifyMessage, 'Verification failed. Please try again.', 'error');
+    } finally {
+        otpVerifySubmit.disabled = false;
+    }
+}
+
+// Handle OTP resend
+async function handleOtpResend() {
+    if (!otpEmail || !otpType) {
+        showAuthMessage(otpVerifyMessage, 'Unable to resend code. Please start over.', 'error');
+        return;
+    }
+    
+    try {
+        showAuthMessage(otpVerifyMessage, 'Resending verification code...', 'info');
+        otpResend.disabled = true;
+        
+        let result;
+        if (otpType === 'signup') {
+            result = await window.SupabaseAuth.signUpWithOtp(otpEmail);
+        } else {
+            result = await window.SupabaseAuth.signInWithOtp(otpEmail);
+        }
+        
+        const { data, error } = result;
+        
+        if (error) {
+            showAuthMessage(otpVerifyMessage, error, 'error');
+        } else {
+            showAuthMessage(otpVerifyMessage, 'Verification code resent! Check your email.', 'success');
+        }
+    } catch (err) {
+        console.error('🔐 OTP resend error:', err);
+        showAuthMessage(otpVerifyMessage, 'Failed to resend code. Please try again.', 'error');
+    } finally {
+        otpResend.disabled = false;
+    }
+}
+
 // Sync data to Supabase
 async function syncToSupabase() {
     if (!isAuthenticated || !syncEnabled) {
@@ -558,10 +730,38 @@ function showSignUpForm() {
 function hideAuthForms() {
     signinForm.classList.add('hidden');
     signupForm.classList.add('hidden');
+    signupOtpForm.classList.add('hidden');
+    signinOtpForm.classList.add('hidden');
+    otpVerifyForm.classList.add('hidden');
     
     // Clear messages
     if (signinMessage) signinMessage.style.display = 'none';
     if (signupMessage) signupMessage.style.display = 'none';
+    if (signupOtpMessage) signupOtpMessage.style.display = 'none';
+    if (signinOtpMessage) signinOtpMessage.style.display = 'none';
+    if (otpVerifyMessage) otpVerifyMessage.style.display = 'none';
+}
+
+// Show specific OTP forms
+function showSignUpOtpForm() {
+    hideAuthForms();
+    signupOtpForm.classList.remove('hidden');
+}
+
+function showSignInOtpForm() {
+    hideAuthForms();
+    signinOtpForm.classList.remove('hidden');
+}
+
+function showOtpVerifyForm() {
+    hideAuthForms();
+    otpVerifyForm.classList.remove('hidden');
+    
+    // Focus on OTP input
+    const otpInput = document.getElementById('otp-code');
+    if (otpInput) {
+        setTimeout(() => otpInput.focus(), 100);
+    }
 }
 
 // ====================
@@ -1033,7 +1233,11 @@ function initializeSidebar() {
         console.log('Setting up event listeners...');
         setupEventListeners();
         
-        // Load profiles and current profile
+        // Load base settings first
+        console.log('Loading base settings...');
+        loadSettings();
+        
+        // Then load profiles and current profile (this will also trigger restoreTranslationBoxes)
         console.log('Loading profiles...');
         loadProfiles();
         
@@ -1163,7 +1367,9 @@ function saveTranslationBoxesLayout() {
     const boxes = document.querySelectorAll('.translation-box');
     settings.translationBoxes = [];
     
-    boxes.forEach(box => {
+    console.log('SaveTranslationBoxesLayout: Found', boxes.length, 'boxes to save');
+    
+    boxes.forEach((box, index) => {
         const provider = box.getAttribute('data-provider');
         const langSelect = box.querySelector('.language-select');
         const targetLanguage = langSelect ? langSelect.value : settings.defaultTargetLanguage;
@@ -1185,10 +1391,26 @@ function saveTranslationBoxesLayout() {
         }
         
         settings.translationBoxes.push(boxConfig);
+        
+        console.log(`SaveTranslationBoxesLayout: Box ${index + 1}:`, {
+            provider,
+            targetLanguage,
+            model: model || 'none'
+        });
     });
     
-    console.log('SaveTranslationBoxesLayout: Saved layout:', settings.translationBoxes);
+    console.log('SaveTranslationBoxesLayout: Final saved layout:', settings.translationBoxes);
+    
+    // Save to chrome storage
     saveSettings();
+    
+    // Save to current profile if we have one
+    if (currentProfileName && profiles[currentProfileName]) {
+        const currentSettings = getCurrentSettings();
+        profiles[currentProfileName] = JSON.parse(JSON.stringify(currentSettings));
+        saveProfiles();
+        console.log('SaveTranslationBoxesLayout: Also saved to current profile:', currentProfileName);
+    }
     
     // Also sync to Supabase if authenticated
     if (isAuthenticated && syncEnabled) {
@@ -1219,16 +1441,33 @@ function restoreTranslationBoxes() {
         console.log(`RestoreTranslationBoxes: Restoring box ${index + 1}:`, boxConfig);
         
         // Validate provider is still enabled
-        if (!settings.enabledProviders[boxConfig.provider]) {
-            console.warn(`RestoreTranslationBoxes: Provider ${boxConfig.provider} is disabled, using first enabled provider`);
-            boxConfig.provider = getFirstEnabledProvider();
+        let provider = boxConfig.provider;
+        if (!settings.enabledProviders[provider]) {
+            console.warn(`RestoreTranslationBoxes: Provider ${provider} is disabled, using first enabled provider`);
+            provider = getFirstEnabledProvider();
         }
         
-        addTranslationBox(
-            boxConfig.provider, 
-            boxConfig.targetLanguage || settings.defaultTargetLanguage,
-            boxConfig.model || null
-        );
+        const targetLanguage = boxConfig.targetLanguage || settings.defaultTargetLanguage;
+        const model = boxConfig.model || null;
+        
+        console.log(`RestoreTranslationBoxes: Creating box with provider=${provider}, language=${targetLanguage}, model=${model}`);
+        
+        addTranslationBox(provider, targetLanguage, model);
+        
+        // Double-check that the model was set correctly after creation
+        if (model) {
+            setTimeout(() => {
+                const boxes = document.querySelectorAll('.translation-box');
+                const box = boxes[index];
+                if (box) {
+                    const modelSelect = box.querySelector('.model-select');
+                    if (modelSelect && modelSelect.value !== model) {
+                        console.log(`RestoreTranslationBoxes: Correcting model selection for box ${index + 1} from ${modelSelect.value} to ${model}`);
+                        modelSelect.value = model;
+                    }
+                }
+            }, 100);
+        }
     });
     
     console.log('RestoreTranslationBoxes: Restoration complete');
@@ -1412,11 +1651,11 @@ function setupEventListeners() {
     
     // Authentication event listeners
     if (showSigninButton) {
-        showSigninButton.addEventListener('click', showSignInForm);
+        showSigninButton.addEventListener('click', showSignInOtpForm);
     }
     
     if (showSignupButton) {
-        showSignupButton.addEventListener('click', showSignUpForm);
+        showSignupButton.addEventListener('click', showSignUpOtpForm);
     }
     
     if (signinSubmit) {
@@ -1444,6 +1683,58 @@ function setupEventListeners() {
             if (isAuthenticated && syncEnabled) {
                 syncToSupabase();
             }
+        });
+    }
+    
+    // OTP authentication event listeners
+    if (signupOtpButton) {
+        signupOtpButton.addEventListener('click', showSignUpOtpForm);
+    }
+    
+    if (signinOtpButton) {
+        signinOtpButton.addEventListener('click', showSignInOtpForm);
+    }
+    
+    if (signupOtpSend) {
+        signupOtpSend.addEventListener('click', handleSignUpWithOtp);
+    }
+    
+    if (signupOtpCancel) {
+        signupOtpCancel.addEventListener('click', hideAuthForms);
+    }
+    
+    if (signinOtpSend) {
+        signinOtpSend.addEventListener('click', handleSignInWithOtp);
+    }
+    
+    if (signinOtpCancel) {
+        signinOtpCancel.addEventListener('click', hideAuthForms);
+    }
+    
+    if (otpVerifySubmit) {
+        otpVerifySubmit.addEventListener('click', handleOtpVerification);
+    }
+    
+    if (otpVerifyCancel) {
+        otpVerifyCancel.addEventListener('click', hideAuthForms);
+    }
+    
+    if (otpResend) {
+        otpResend.addEventListener('click', handleOtpResend);
+    }
+    
+    // Add Enter key support for OTP input
+    const otpCodeInput = document.getElementById('otp-code');
+    if (otpCodeInput) {
+        otpCodeInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleOtpVerification();
+            }
+        });
+        
+        // Auto-format OTP input (numbers only)
+        otpCodeInput.addEventListener('input', (e) => {
+            e.target.value = e.target.value.replace(/[^0-9]/g, '').slice(0, 6);
         });
     }
     
@@ -1572,6 +1863,12 @@ function handleTranslationsContainerChange(event) {
         // Update box data attribute
         box.setAttribute('data-provider', newProvider);
         
+        // Update provider name in header
+        const providerNameElement = box.querySelector('.provider-name');
+        if (providerNameElement) {
+            providerNameElement.textContent = providerNames[newProvider] || newProvider;
+        }
+        
         // Update model selector for AI providers
         updateModelSelector(box, newProvider);
         
@@ -1587,6 +1884,12 @@ function handleTranslationsContainerChange(event) {
         const box = target.closest('.translation-box');
         const provider = box.getAttribute('data-provider');
         const newLang = target.value;
+        
+        // Update target language display in header
+        const targetLanguageElement = box.querySelector('.target-language');
+        if (targetLanguageElement) {
+            targetLanguageElement.textContent = getLanguageName(newLang);
+        }
         
         // Retranslate with new language
         translateText(box, provider, newLang);
@@ -2219,4 +2522,37 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeSidebar);
 } else {
     initializeSidebar();
+}
+
+// Primary authentication (OTP) event listeners
+if (showSigninButton) {
+    showSigninButton.addEventListener('click', showSignInOtpForm);
+}
+
+if (showSignupButton) {
+    showSignupButton.addEventListener('click', showSignUpOtpForm);
+}
+
+// Advanced auth options
+if (showAdvancedAuth) {
+    showAdvancedAuth.addEventListener('click', () => {
+        authLoggedOut.classList.add('hidden');
+        authAdvancedOptions.classList.remove('hidden');
+    });
+}
+
+if (advancedAuthCancel) {
+    advancedAuthCancel.addEventListener('click', () => {
+        authAdvancedOptions.classList.add('hidden');
+        authLoggedOut.classList.remove('hidden');
+        hideAuthForms();
+    });
+}
+
+if (showSigninPassword) {
+    showSigninPassword.addEventListener('click', showSignInForm);
+}
+
+if (showSignupPassword) {
+    showSignupPassword.addEventListener('click', showSignUpForm);
 }

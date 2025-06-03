@@ -470,6 +470,48 @@ body {
     display: block;
 }
 
+.auth-alternative {
+    text-align: center;
+    margin: 16px 0;
+    font-size: 14px;
+    color: #666;
+}
+
+.auth-alternative span {
+    display: block;
+    margin-bottom: 8px;
+}
+
+.link-button {
+    background: none;
+    border: none;
+    color: #1a73e8;
+    text-decoration: underline;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0;
+    margin: 0;
+}
+
+.link-button:hover {
+    color: #1557b0;
+}
+
+.otp-instructions {
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 16px;
+    line-height: 1.4;
+    text-align: center;
+}
+
+#otp-code {
+    text-align: center;
+    font-size: 18px;
+    letter-spacing: 2px;
+    font-family: monospace;
+}
+
 .auth-logged-in {
     padding: 16px;
     background-color: #f8f9fa;
