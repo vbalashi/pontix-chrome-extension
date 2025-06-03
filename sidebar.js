@@ -795,9 +795,14 @@ function loadProfiles() {
         updateProfileDropdown();
         updateProfilesList();
         
-        // Load current profile if set
+        // Load current profile if set (this will update settings and restore translation boxes)
         if (currentProfileName && profiles[currentProfileName]) {
+            console.log('LoadProfiles: Loading current profile:', currentProfileName);
             loadProfile(currentProfileName, false); // false = don't save settings before loading
+        } else {
+            // If no profile is set, just restore translation boxes with current settings
+            console.log('LoadProfiles: No current profile, restoring translation boxes with current settings');
+            restoreTranslationBoxes();
         }
     });
 }
@@ -1206,10 +1211,56 @@ function testGemini() {
     console.log('✅ Test complete');
 }
 
+// Test persistence by manually saving and restoring translation boxes
+function testPersistence() {
+    console.log('🧪 TESTING TRANSLATION BOX PERSISTENCE');
+    
+    // Save current state
+    console.log('💾 Saving current translation boxes...');
+    saveTranslationBoxesLayout();
+    
+    // Show current state
+    const boxes = document.querySelectorAll('.translation-box');
+    console.log('📊 Current boxes before test:');
+    boxes.forEach((box, index) => {
+        const provider = box.getAttribute('data-provider');
+        const langSelect = box.querySelector('.language-select');
+        const modelSelect = box.querySelector('.model-select');
+        console.log(`  Box ${index + 1}: ${provider}, ${langSelect?.value}, model: ${modelSelect?.value || 'none'}`);
+    });
+    
+    // Clear and restore
+    console.log('🔄 Clearing and restoring translation boxes...');
+    setTimeout(() => {
+        if (translationsContainer) {
+            translationsContainer.innerHTML = '';
+        }
+        
+        setTimeout(() => {
+            restoreTranslationBoxes();
+            
+            // Check restored state
+            setTimeout(() => {
+                const restoredBoxes = document.querySelectorAll('.translation-box');
+                console.log('📊 Restored boxes after test:');
+                restoredBoxes.forEach((box, index) => {
+                    const provider = box.getAttribute('data-provider');
+                    const langSelect = box.querySelector('.language-select');
+                    const modelSelect = box.querySelector('.model-select');
+                    console.log(`  Box ${index + 1}: ${provider}, ${langSelect?.value}, model: ${modelSelect?.value || 'none'}`);
+                });
+                
+                console.log('✅ Persistence test complete');
+            }, 200);
+        }, 100);
+    }, 100);
+}
+
 // Attach functions to window immediately
 window.forceRefreshDropdowns = forceRefreshAllProviderDropdowns;
 window.debugTranslator = debugTranslator;  
 window.testGemini = testGemini;
+window.testPersistence = testPersistence;
 
 // Initialize the sidebar
 function initializeSidebar() {
@@ -1289,7 +1340,7 @@ function loadSettings() {
         console.warn('LoadSettings: Chrome storage API not available, using defaults');
         console.log('LoadSettings: This might be expected in iframe context');
         updateSettingsUI();
-        restoreTranslationBoxes();
+        // Note: restoreTranslationBoxes will be called by loadProfiles
         return;
     }
     
@@ -1301,7 +1352,7 @@ function loadSettings() {
                 console.error('LoadSettings: Chrome runtime error:', chrome.runtime.lastError);
                 console.log('LoadSettings: Falling back to defaults...');
                 updateSettingsUI();
-                restoreTranslationBoxes();
+                // Note: restoreTranslationBoxes will be called by loadProfiles
                 return;
             }
             
@@ -1326,15 +1377,14 @@ function loadSettings() {
                 console.log('LoadSettings: No saved settings found, using defaults');
             }
             
-            // Update UI and restore boxes
+            // Update UI (restoreTranslationBoxes will be called by loadProfiles)
             updateSettingsUI();
-            restoreTranslationBoxes();
         });
     } catch (error) {
         console.error('LoadSettings: Error accessing chrome.storage:', error);
         console.log('LoadSettings: Using default settings and proceeding...');
         updateSettingsUI();
-        restoreTranslationBoxes();
+        // Note: restoreTranslationBoxes will be called by loadProfiles
     }
 }
 
