@@ -165,42 +165,102 @@ const languageNames = {
     'co': 'Corsican',
     'hr': 'Croatian',
     'cs': 'Czech',
+    'cy': 'Welsh',
     'da': 'Danish',
     'de': 'German',
     'el': 'Greek',
     'en': 'English',
     'en-gb': 'English (British)',
     'en-us': 'English (American)',
+    'eo': 'Esperanto',
     'es': 'Spanish',
     'et': 'Estonian',
+    'fa': 'Persian',
     'fi': 'Finnish',
     'fr': 'French',
+    'fy': 'Frisian',
+    'ga': 'Irish',
+    'gd': 'Scottish Gaelic',
+    'gl': 'Galician',
+    'gu': 'Gujarati',
+    'ha': 'Hausa',
+    'haw': 'Hawaiian',
+    'he': 'Hebrew',
+    'iw': 'Hebrew',
     'hi': 'Hindi',
+    'hmn': 'Hmong',
     'hu': 'Hungarian',
+    'is': 'Icelandic',
+    'ig': 'Igbo',
     'id': 'Indonesian',
     'it': 'Italian',
     'ja': 'Japanese',
+    'jw': 'Javanese',
+    'ka': 'Georgian',
+    'kk': 'Kazakh',
+    'km': 'Khmer',
+    'kn': 'Kannada',
     'ko': 'Korean',
+    'ku': 'Kurdish',
+    'ky': 'Kyrgyz',
+    'la': 'Latin',
+    'lb': 'Luxembourgish',
+    'lo': 'Lao',
     'lt': 'Lithuanian',
     'lv': 'Latvian',
-    'nb': 'Norwegian Bokmål',
+    'mg': 'Malagasy',
+    'mi': 'Maori',
+    'mk': 'Macedonian',
+    'ml': 'Malayalam',
+    'mn': 'Mongolian',
+    'mr': 'Marathi',
+    'ms': 'Malay',
+    'mt': 'Maltese',
+    'my': 'Myanmar (Burmese)',
+    'ne': 'Nepali',
     'nl': 'Dutch',
+    'no': 'Norwegian',
+    'nb': 'Norwegian Bokmål',
+    'pa': 'Punjabi',
     'pl': 'Polish',
+    'ps': 'Pashto',
     'pt': 'Portuguese',
     'pt-br': 'Portuguese (Brazilian)',
     'pt-pt': 'Portuguese (European)',
     'ro': 'Romanian',
     'ru': 'Russian',
+    'sm': 'Samoan',
+    'sn': 'Shona',
+    'sd': 'Sindhi',
+    'si': 'Sinhala',
     'sk': 'Slovak',
     'sl': 'Slovenian',
+    'so': 'Somali',
+    'sr': 'Serbian',
+    'st': 'Sesotho',
+    'su': 'Sundanese',
     'sv': 'Swedish',
+    'sw': 'Swahili',
+    'ta': 'Tamil',
+    'te': 'Telugu',
+    'tg': 'Tajik',
     'th': 'Thai',
+    'tl': 'Filipino',
     'tr': 'Turkish',
     'uk': 'Ukrainian',
+    'ur': 'Urdu',
+    'uz': 'Uzbek',
     'vi': 'Vietnamese',
+    'xh': 'Xhosa',
+    'yi': 'Yiddish',
+    'yo': 'Yoruba',
     'zh': 'Chinese',
+    'zh-cn': 'Chinese (Simplified)',
+    'zh-tw': 'Chinese (Traditional)',
     'zh-hans': 'Chinese (Simplified)',
-    'zh-hant': 'Chinese (Traditional)'
+    'zh-hant': 'Chinese (Traditional)',
+    'zu': 'Zulu',
+    'ht': 'Haitian Creole'
 };
 
 // Debounce variables for translation requests
@@ -2117,8 +2177,11 @@ function handleTranslationsContainerChange(event) {
             providerNameElement.textContent = providerNames[newProvider] || newProvider;
         }
         
-        // Update model selector for AI providers (this handles model display too)
-        updateModelSelector(box, newProvider);
+        // Automatically fetch models for AI providers if needed
+        ensureAIModelsAvailable(newProvider).then(() => {
+            // Update model selector for AI providers (this handles model display too)
+            updateModelSelector(box, newProvider);
+        });
         
         // Retranslate with new provider
         const langSelect = box.querySelector('.language-select');
@@ -2171,86 +2234,94 @@ function addTranslationBox(provider, targetLang, model = null) {
     
     translationBoxCounter++;
     
-    const getModelSelectorHTML = (provider) => {
-        const aiProviders = ['openai', 'claude', 'gemini'];
-        if (!aiProviders.includes(provider)) return '';
+    // Automatically fetch models for AI providers if needed
+    const setupBoxWithModels = async () => {
+        await ensureAIModelsAvailable(provider);
         
-        const providerModels = dynamicData.availableModels[provider] || [];
-        const selectedModel = model || providerModels[0] || '';
+        const getModelSelectorHTML = (provider) => {
+            const aiProviders = ['openai', 'claude', 'gemini'];
+            if (!aiProviders.includes(provider)) return '';
+            
+            const providerModels = dynamicData.availableModels[provider] || [];
+            const selectedModel = model || providerModels[0] || '';
+            
+            return `
+                <div class="model-selector">
+                    <label for="model-select-${translationBoxCounter}">Model:</label>
+                    <select class="model-select" id="model-select-${translationBoxCounter}">
+                        ${providerModels.map(m => `<option value="${m}" ${m === selectedModel ? 'selected' : ''}>${m}</option>`).join('')}
+                    </select>
+                </div>
+            `;
+        };
         
-        return `
-            <div class="model-selector">
-                <label for="model-select-${translationBoxCounter}">Model:</label>
-                <select class="model-select" id="model-select-${translationBoxCounter}">
-                    ${providerModels.map(m => `<option value="${m}" ${m === selectedModel ? 'selected' : ''}>${m}</option>`).join('')}
-                </select>
+        const getModelDisplayHTML = (provider) => {
+            const aiProviders = ['openai', 'claude', 'gemini'];
+            if (!aiProviders.includes(provider)) return '';
+            
+            const providerModels = dynamicData.availableModels[provider] || [];
+            const selectedModel = model || providerModels[0] || '';
+            
+            return `<span class="model-name">${selectedModel}</span>`;
+        };
+        
+        const box = document.createElement('div');
+        box.className = 'translation-box';
+        box.setAttribute('data-provider', provider);
+        
+        box.innerHTML = `
+            <div class="translation-header">
+                <div class="provider-info">
+                    <span class="provider-name">${providerNames[provider] || provider}</span>
+                    <span class="target-language">${getLanguageName(targetLang)}</span>
+                    ${getModelDisplayHTML(provider)}
+                </div>
+                <div class="translation-controls">
+                    <button class="settings-button" title="Settings">
+                        <svg width="16" height="16" viewBox="0 0 24 24">
+                            <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+                        </svg>
+                    </button>
+                    <button class="delete-button" title="Delete">
+                        <svg width="16" height="16" viewBox="0 0 24 24">
+                            <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="translation-content">
+                <div class="translation-loading-indicator">Ready to translate...</div>
+            </div>
+            <div class="provider-settings" style="display: none;">
+                <div class="provider-selector">
+                    <label for="provider-select-${translationBoxCounter}">Provider:</label>
+                    <select class="provider-select" id="provider-select-${translationBoxCounter}">
+                        ${generateProviderOptions(provider)}
+                    </select>
+                </div>
+                <div class="language-selector">
+                    <label for="language-select-${translationBoxCounter}">Target Language:</label>
+                    <select class="language-select" id="language-select-${translationBoxCounter}">
+                        ${generateLanguageOptions(provider, targetLang)}
+                    </select>
+                </div>
+                ${getModelSelectorHTML(provider)}
+                <div class="api-key-reminder">
+                    ${settings.apiKeys[provider] ? '✓ API key configured' : '⚠️ API key required in settings'}
+                </div>
             </div>
         `;
+        
+        translationsContainer.appendChild(box);
+        
+        // Translate immediately if we have text
+        if (currentWord) {
+            translateText(box, provider, targetLang);
+        }
     };
     
-    const getModelDisplayHTML = (provider) => {
-        const aiProviders = ['openai', 'claude', 'gemini'];
-        if (!aiProviders.includes(provider)) return '';
-        
-        const providerModels = dynamicData.availableModels[provider] || [];
-        const selectedModel = model || providerModels[0] || '';
-        
-        return `<span class="model-name">${selectedModel}</span>`;
-    };
-    
-    const box = document.createElement('div');
-    box.className = 'translation-box';
-    box.setAttribute('data-provider', provider);
-    
-    box.innerHTML = `
-        <div class="translation-header">
-            <div class="provider-info">
-                <span class="provider-name">${providerNames[provider] || provider}</span>
-                <span class="target-language">${getLanguageName(targetLang)}</span>
-                ${getModelDisplayHTML(provider)}
-            </div>
-            <div class="translation-controls">
-                <button class="settings-button" title="Settings">
-                    <svg width="16" height="16" viewBox="0 0 24 24">
-                        <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
-                    </svg>
-                </button>
-                <button class="delete-button" title="Delete">
-                    <svg width="16" height="16" viewBox="0 0 24 24">
-                        <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
-                    </svg>
-                </button>
-            </div>
-        </div>
-        <div class="translation-content">
-            <div class="translation-loading-indicator">Ready to translate...</div>
-        </div>
-        <div class="provider-settings" style="display: none;">
-            <div class="provider-selector">
-                <label for="provider-select-${translationBoxCounter}">Provider:</label>
-                <select class="provider-select" id="provider-select-${translationBoxCounter}">
-                    ${generateProviderOptions(provider)}
-                </select>
-            </div>
-            <div class="language-selector">
-                <label for="language-select-${translationBoxCounter}">Target Language:</label>
-                <select class="language-select" id="language-select-${translationBoxCounter}">
-                    ${generateLanguageOptions(provider, targetLang)}
-                </select>
-            </div>
-            ${getModelSelectorHTML(provider)}
-            <div class="api-key-reminder">
-                ${settings.apiKeys[provider] ? '✓ API key configured' : '⚠️ API key required in settings'}
-            </div>
-        </div>
-    `;
-    
-    translationsContainer.appendChild(box);
-    
-    // Translate immediately if we have text
-    if (currentWord) {
-        translateText(box, provider, targetLang);
-    }
+    // Execute the setup
+    setupBoxWithModels();
 }
 
 // Generate provider options HTML
@@ -2633,18 +2704,11 @@ function translateWithOpenAI(word, sentence, targetLang, boxElement) {
     }
     
     const modelSelect = boxElement.querySelector('.model-select');
-    const model = modelSelect ? modelSelect.value : 'gpt-3.5-turbo';
+    // Use dynamic model data instead of hardcoded default
+    const availableModels = dynamicData.availableModels.openai || ['gpt-3.5-turbo'];
+    const model = modelSelect ? modelSelect.value : availableModels[0];
     
-    const languageNames = {
-        'ru': 'Russian',
-        'en': 'English',
-        'de': 'German',
-        'fr': 'French',
-        'es': 'Spanish',
-        'zh': 'Chinese',
-        'ja': 'Japanese'
-    };
-    
+    // Use global languageNames instead of hardcoded short list
     const targetLanguageName = languageNames[targetLang] || targetLang;
     
     let prompt;
@@ -2699,18 +2763,11 @@ function translateWithClaude(word, sentence, targetLang, boxElement) {
     }
     
     const modelSelect = boxElement.querySelector('.model-select');
-    const model = modelSelect ? modelSelect.value : 'claude-3-sonnet-20240229';
+    // Use dynamic model data instead of hardcoded default
+    const availableModels = dynamicData.availableModels.claude || ['claude-3-sonnet-20240229'];
+    const model = modelSelect ? modelSelect.value : availableModels[0];
     
-    const languageNames = {
-        'ru': 'Russian',
-        'en': 'English',
-        'de': 'German',
-        'fr': 'French',
-        'es': 'Spanish',
-        'zh': 'Chinese',
-        'ja': 'Japanese'
-    };
-    
+    // Use global languageNames instead of hardcoded short list
     const targetLanguageName = languageNames[targetLang] || targetLang;
     
     let prompt;
@@ -2765,18 +2822,11 @@ function translateWithGemini(word, sentence, targetLang, boxElement) {
     }
     
     const modelSelect = boxElement.querySelector('.model-select');
-    const model = modelSelect ? modelSelect.value : 'gemini-1.5-flash';
+    // Use dynamic model data instead of hardcoded default
+    const availableModels = dynamicData.availableModels.gemini || ['gemini-1.5-flash'];
+    const model = modelSelect ? modelSelect.value : availableModels[0];
     
-    const languageNames = {
-        'ru': 'Russian',
-        'en': 'English',
-        'de': 'German',
-        'fr': 'French',
-        'es': 'Spanish',
-        'zh': 'Chinese',
-        'ja': 'Japanese'
-    };
-    
+    // Use global languageNames instead of hardcoded short list
     const targetLanguageName = languageNames[targetLang] || targetLang;
     
     let prompt;
@@ -3179,3 +3229,56 @@ async function updateLanguagesAndModels() {
 // ====================
 // END DYNAMIC LANGUAGE AND MODEL FETCHING
 // ====================
+
+// Automatically fetch models for AI providers
+async function ensureAIModelsAvailable(provider) {
+    const aiProviders = ['openai', 'claude', 'gemini'];
+    if (!aiProviders.includes(provider)) {
+        return; // Not an AI provider, skip
+    }
+    
+    // Check if we already have models for this provider
+    const currentModels = dynamicData.availableModels[provider];
+    if (currentModels && currentModels.length > 0) {
+        console.log(`✅ ${provider} models already available:`, currentModels.length);
+        return; // Already have models
+    }
+    
+    console.log(`🔄 Fetching models for ${provider}...`);
+    
+    try {
+        let models = [];
+        
+        switch (provider) {
+            case 'openai':
+                models = await fetchOpenAIModels();
+                break;
+            case 'claude':
+                models = await fetchClaudeModels();
+                break;
+            case 'gemini':
+                models = await fetchGeminiModels();
+                break;
+        }
+        
+        if (models && models.length > 0) {
+            // Update dynamic data
+            dynamicData.availableModels[provider] = models;
+            dynamicData.lastModelUpdate = new Date().toISOString();
+            
+            // Save to storage
+            saveSettings();
+            
+            // Sync to cloud if authenticated
+            if (isAuthenticated && syncEnabled) {
+                syncToSupabase();
+            }
+            
+            console.log(`✅ Updated ${provider} models:`, models.length);
+        } else {
+            console.warn(`⚠️ No models fetched for ${provider}`);
+        }
+    } catch (error) {
+        console.error(`❌ Failed to fetch models for ${provider}:`, error);
+    }
+}
