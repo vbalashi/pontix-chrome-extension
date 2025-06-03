@@ -10,3 +10,8 @@ TESTING_GUIDE.md
 README.md
 .git/
 .cursor/
+build/
+graphics/
+*.zip
+test*
+TESTING_GUIDE.md
