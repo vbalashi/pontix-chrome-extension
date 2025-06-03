@@ -62,9 +62,9 @@ build/
 ├── sidebar.js
 ├── supabase-client.js
 └── icons/
-    ├── icon16.png
-    ├── icon48.png
-    └── icon128.png
+    ├── pontix_icon_16.png
+    ├── pontix_icon_48.png
+    └── pontix_icon_128.png
 ```
 
 #### Submission Steps:

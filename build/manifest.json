@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Chrome Translator",
+  "name": "Pontix",
   "version": "1.0",
   "description": "A sidebar translator extension with multiple translation service providers",
   "permissions": [
@@ -16,17 +16,17 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Toggle Translator Sidebar",
+    "default_title": "Toggle Pontix Sidebar",
     "default_icon": {
-      "16": "icons/icon16.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
+      "16": "icons/pontix_icon_16.png",
+      "48": "icons/pontix_icon_48.png",
+      "128": "icons/pontix_icon_128.png"
     }
   },
   "icons": {
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
+    "16": "icons/pontix_icon_16.png",
+    "48": "icons/pontix_icon_48.png",
+    "128": "icons/pontix_icon_128.png"
   },
   "content_scripts": [
     {

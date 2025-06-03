@@ -1,4 +1,4 @@
-# Supabase Setup Guide for Chrome Translator Extension
+# Supabase Setup Guide for Chrome Pontix Extension
 
 ## 1. Create Supabase Project
 
