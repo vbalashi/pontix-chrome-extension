@@ -176,8 +176,8 @@ if (window.translatorExtensionLoaded) {
         
         if (contentContainer) {
             // Adjust the width to make room for sidebar
-            contentContainer.style.maxWidth = "calc(100% - 300px)";
-            contentContainer.style.marginRight = "300px";
+            contentContainer.style.maxWidth = "calc(100% - 400px)";
+            contentContainer.style.marginRight = "400px";
         }
     }
     
@@ -628,7 +628,7 @@ if (window.translatorExtensionLoaded) {
                     if (selectedText && selectedText !== lastProcessedSelection) {
                         console.log("⌨️ Keyboard shortcut selection detected");
                         processSelection(selection);
-                        lastProcessedSelection = selectedText;
+                        lastSelection = selectedText;
                     }
                 }, 100);
             }
@@ -667,202 +667,41 @@ if (window.translatorExtensionLoaded) {
     
     // Enhanced page layout adjustment for readers
     function adjustPageLayoutForReader() {
-        console.log("🎨 Adjusting page layout for reader");
+        console.log("📐 Adjusting page layout for reader view");
         
-        // Prevent recursive calls
-        if (document.body.dataset.translatorLayoutAdjusted === 'true') {
-            console.log("⚠️ Layout already adjusted, skipping");
+        // Check if we've already adjusted the layout
+        if (document.body.hasAttribute('data-translator-layout-adjusted')) {
+            console.log("📐 Layout already adjusted, skipping");
             return;
         }
         
-        // Create a CSS style element for more reliable styling
-        let styleElement = document.getElementById('translator-layout-styles');
-        if (!styleElement) {
-            styleElement = document.createElement('style');
-            styleElement.id = 'translator-layout-styles';
-            document.head.appendChild(styleElement);
-        }
+        // Instead of adding margin to body, just ensure sidebar positioning works
+        // Only add minimal margin to prevent content overlap
+        document.body.style.marginRight = "20px"; // Just a small buffer
+        document.body.style.transition = "margin-right 0.3s ease-in-out";
+        document.body.setAttribute('data-translator-layout-adjusted', 'true');
         
-        // CSS rules that will override Angular's styles
-        const cssRules = `
-            /* Main content containers */
-            [ng-view] {
-                margin-right: 320px !important;
-                max-width: calc(100vw - 340px) !important;
-                transition: margin-right 0.3s ease, max-width 0.3s ease !important;
-            }
-            
-            /* Additional selectors for common reader layouts */
-            .content,
-            #content,
-            main,
-            .main-content,
-            .page-content,
-            .reader-content {
-                margin-right: 320px !important;
-                max-width: calc(100vw - 340px) !important;
-                transition: margin-right 0.3s ease, max-width 0.3s ease !important;
-            }
-            
-            /* Ensure body doesn't get too narrow */
-            body {
-                margin-right: 0 !important;
-                transition: all 0.3s ease !important;
-            }
-            
-            /* Handle any iframe content */
-            iframe[src*="xhtml"] {
-                margin-right: 0 !important;
-                max-width: 100% !important;
-            }
-            
-            /* Override text selection blocking */
-            * {
-                -webkit-user-select: text !important;
-                -moz-user-select: text !important;
-                -ms-user-select: text !important;
-                user-select: text !important;
-                -webkit-touch-callout: default !important;
-                -webkit-tap-highlight-color: rgba(0,0,0,0) !important;
-            }
-            
-            /* Re-enable context menu and copy */
-            body, div, p, span, iframe {
-                pointer-events: auto !important;
-                -webkit-user-select: text !important;
-                -moz-user-select: text !important;
-                user-select: text !important;
-            }
-            
-            /* Ensure the translator sidebar has proper styling */
-            #translator-sidebar,
-            #translator-sidebar-container {
-                position: fixed !important;
-                right: 0 !important;
-                top: 0 !important;
-                width: 300px !important;
-                height: 100vh !important;
-                z-index: 2147483647 !important;
-                background: white !important;
-                box-shadow: -2px 0 5px rgba(0, 0, 0, 0.2) !important;
-                border: none !important;
-            }
-        `;
+        console.log("📐 Page layout adjusted: minimal margin applied");
         
-        styleElement.textContent = cssRules;
-        console.log("✅ Applied CSS-based layout adjustments");
+        // Don't adjust individual containers - let them use natural width
+        // The sidebar will overlay on top with high z-index
         
-        // Try multiple selectors for reader content - but now just for logging
-        const possibleContainers = [
-            '[ng-view]',
-            '.content',
-            '#content',
-            '[class*="reader"]',
-            '[class*="book"]',
-            '[class*="text"]',
-            'main',
-            '.main-content',
-            '.page-content',
-            '.reader-content'
-        ];
-        
-        let contentContainer = null;
-        
-        for (const selector of possibleContainers) {
-            contentContainer = document.querySelector(selector);
-            if (contentContainer && !contentContainer.dataset.translatorModified) {
-                console.log("📍 Found content container:", selector);
-                
-                // Store original styles for restoration and mark as modified
-                if (!contentContainer.dataset.originalMargin) {
-                    contentContainer.dataset.originalMargin = contentContainer.style.marginRight || '';
-                    contentContainer.dataset.originalMaxWidth = contentContainer.style.maxWidth || '';
-                    contentContainer.dataset.originalWidth = contentContainer.style.width || '';
-                }
-                contentContainer.dataset.translatorModified = 'true';
-                break;
-            }
-        }
-        
-        // Also apply inline styles as backup (with !important via style attribute)
-        if (contentContainer) {
-            // Force the styles via setAttribute to ensure they stick
-            const currentStyle = contentContainer.getAttribute('style') || '';
-            const newStyle = currentStyle + 
-                '; margin-right: 320px !important; max-width: calc(100vw - 340px) !important; transition: all 0.3s ease !important;';
-            contentContainer.setAttribute('style', newStyle);
-            console.log("✅ Applied inline style backup to container");
-        }
-        
-        // Mark body as adjusted
-        document.body.dataset.translatorLayoutAdjusted = 'true';
-        console.log("✅ Layout adjustment completed with CSS injection");
+        layoutAdjusted = true;
     }
     
     // Reset page layout adjustments
     function resetPageLayoutAdjustments() {
         console.log("🔄 Resetting page layout");
         
-        // Remove the CSS style element
-        const styleElement = document.getElementById('translator-layout-styles');
-        if (styleElement) {
-            styleElement.remove();
-            console.log("✅ Removed CSS-based layout styles");
+        // Reset body margin and remove flag
+        if (document.body.hasAttribute('data-translator-layout-adjusted')) {
+            document.body.style.marginRight = "";
+            document.body.style.transition = "";
+            document.body.removeAttribute('data-translator-layout-adjusted');
+            console.log("📐 Reset body margin");
         }
         
-        // Reset all possible containers
-        const possibleContainers = [
-            '[ng-view]',
-            '.content',
-            '#content',
-            '[class*="reader"]',
-            '[class*="book"]',
-            '[class*="text"]',
-            'main',
-            '.main-content',
-            '.page-content',
-            '.reader-content'
-        ];
-        
-        possibleContainers.forEach(selector => {
-            const container = document.querySelector(selector);
-            if (container && container.dataset.originalMargin !== undefined) {
-                // Restore original styles
-                container.style.marginRight = container.dataset.originalMargin;
-                container.style.maxWidth = container.dataset.originalMaxWidth;
-                container.style.width = container.dataset.originalWidth;
-                
-                // Clean up any added inline styles
-                const currentStyle = container.getAttribute('style') || '';
-                const cleanedStyle = currentStyle
-                    .replace(/;\s*margin-right:[^;]+!important/g, '')
-                    .replace(/;\s*max-width:[^;]+!important/g, '')
-                    .replace(/;\s*transition:[^;]+!important/g, '');
-                
-                if (cleanedStyle.trim()) {
-                    container.setAttribute('style', cleanedStyle);
-                } else {
-                    container.removeAttribute('style');
-                }
-                
-                // Clean up data attributes
-                delete container.dataset.originalMargin;
-                delete container.dataset.originalMaxWidth;
-                delete container.dataset.originalWidth;
-                delete container.dataset.translatorModified;
-                
-                console.log("✅ Reset container:", selector);
-            }
-        });
-        
-        // Reset body
-        if (document.body.dataset.originalMargin !== undefined) {
-            document.body.style.marginRight = document.body.dataset.originalMargin;
-            delete document.body.dataset.originalMargin;
-        }
-        
-        // Remove layout adjustment flag
-        delete document.body.dataset.translatorLayoutAdjusted;
+        layoutAdjusted = false;
         console.log("✅ Page layout reset completed");
     }
     
@@ -1054,8 +893,14 @@ if (window.translatorExtensionLoaded) {
     
     // Update the sidebar toggle handler
     function handleSidebarToggle() {
+        console.log("🔄 Handling sidebar toggle - enabled:", sidebarEnabled, "visible:", sidebarVisible);
+        
         if (sidebarEnabled) {
-            if (!document.getElementById("translator-sidebar") && !document.getElementById("translator-sidebar-container")) {
+            const existingSidebar = document.getElementById("translator-sidebar");
+            const existingContainer = document.getElementById("translator-sidebar-container");
+            
+            if (!existingSidebar && !existingContainer) {
+                console.log("🎨 Creating new sidebar");
                 if (isEdgeImmersiveMode) {
                     createImmersiveModeIframe();
                 } else {
@@ -1063,6 +908,7 @@ if (window.translatorExtensionLoaded) {
                 }
                 sidebarVisible = true;
             } else {
+                console.log("📱 Showing existing sidebar");
                 showSidebar();
             }
             
@@ -1078,8 +924,10 @@ if (window.translatorExtensionLoaded) {
                 setupSelectionHandlers();
             }
         } else {
+            console.log("🙈 Hiding/removing sidebar");
             hideSidebar();
             
+            // Reset layout adjustments
             if (isEdgeImmersiveMode) {
                 resetImmersiveModeAdjustments();
             } else {
@@ -1090,34 +938,60 @@ if (window.translatorExtensionLoaded) {
     
     // Function to create sidebar
     function createSidebar() {
+        console.log("🎨 Creating sidebar iframe...");
+        
         const sidebar = document.createElement("iframe");
         sidebar.id = "translator-sidebar";
         sidebar.src = chrome.runtime.getURL("sidebar.html");
         sidebar.style.position = "fixed";
         sidebar.style.right = "0";
         sidebar.style.top = "0";
-        sidebar.style.width = "300px";
+        sidebar.style.width = "400px";
         sidebar.style.height = "100vh";
         sidebar.style.border = "none";
-        sidebar.style.zIndex = "99999"; // Higher z-index to ensure it's visible
+        sidebar.style.zIndex = "2147483647"; // Maximum z-index to ensure it's on top
         sidebar.style.background = "white";
-        sidebar.style.boxShadow = "-2px 0 5px rgba(0, 0, 0, 0.2)";
+        sidebar.style.boxShadow = "-2px 0 10px rgba(0, 0, 0, 0.3)";
         sidebar.style.transition = "transform 0.3s ease-in-out";
+        sidebar.style.transform = "translateX(0)"; // Start visible
+        sidebar.style.borderLeft = "1px solid #e0e0e0";
+        
+        console.log("🔧 Sidebar src set to:", sidebar.src);
+        
+        // Add load/error event listeners
+        sidebar.addEventListener('load', () => {
+            console.log("✅ Sidebar iframe loaded successfully");
+            console.log("📄 Iframe document ready state:", sidebar.contentDocument?.readyState);
+            console.log("🌍 Iframe content window available:", !!sidebar.contentWindow);
+            
+            // Try to access iframe content after a short delay
+            setTimeout(() => {
+                try {
+                    if (sidebar.contentDocument) {
+                        console.log("📝 Iframe document title:", sidebar.contentDocument.title);
+                        console.log("📝 Iframe body exists:", !!sidebar.contentDocument.body);
+                        console.log("📝 Selection element in iframe:", !!sidebar.contentDocument.getElementById('selection'));
+                    } else {
+                        console.log("❌ Cannot access iframe contentDocument");
+                    }
+                } catch (error) {
+                    console.log("❌ Error accessing iframe content:", error.message);
+                }
+            }, 500);
+        });
+        
+        sidebar.addEventListener('error', (error) => {
+            console.error("❌ Sidebar iframe failed to load:", error);
+        });
         
         // Special handling for Edge immersive reader mode
         if (isEdgeImmersiveMode) {
-            // Ensure the sidebar is placed above Edge's immersive reader content
-            sidebar.style.zIndex = "2147483647"; // Maximum z-index value
-            
-            // Target where to insert the sidebar in immersive reader mode
-            const immersiveContainer = document.querySelector('.immersive-reader-content') || 
-                                      document.body;
-            
             // Add special class for identifying in immersive mode
             sidebar.classList.add('translator-immersive-mode');
         }
 
         document.body.appendChild(sidebar);
+        console.log("📌 Sidebar iframe appended to body");
         
         // For Edge immersive reader, we need to ensure the iframe loads properly
         if (isEdgeImmersiveMode) {
@@ -1131,30 +1005,55 @@ if (window.translatorExtensionLoaded) {
                 }
             }, 500);
         }
+        
+        console.log("✅ Sidebar created with overlay positioning");
     }
     
     // Function to update sidebar with new selection
     function updateSidebar(word, sentence, selectedText = "") {
+        console.log("🎯 updateSidebar called with:", { word, sentence: sentence.substring(0, 50) + "...", selectedText });
+        
         const sidebar = document.getElementById("translator-sidebar");
+        console.log("🔍 Sidebar element found:", !!sidebar);
+        
+        if (sidebar) {
+            console.log("🔍 Sidebar contentWindow:", !!sidebar.contentWindow);
+            console.log("🔍 Sidebar src:", sidebar.src);
+            console.log("🔍 Sidebar ready state:", sidebar.contentDocument?.readyState);
+        }
+        
         if (sidebar && sidebar.contentWindow) {
             try {
+                console.log("📤 Attempting to send postMessage...");
+                
                 // Use postMessage for iframe communication
                 sidebar.contentWindow.postMessage({
-                    type: "translateWord",
-                    word: word,
+                    type: "textSelected",
+                    selectedText: word,
                     sentence: sentence,
-                    selectedText: selectedText,
-                    isMouseDown: isMouseDown
+                    source: "translatorContentScript"
                 }, "*");
+                
                 console.log("📤 Sent translation request to sidebar:", { word, sentence: sentence.substring(0, 50) + "..." });
+                return true;
             } catch (error) {
                 console.error("❌ Error sending message to sidebar:", error);
+                console.error("❌ Error details:", error.message, error.stack);
+                
                 // Fallback: try alternative method
                 updateSidebarAlternative(word, sentence, selectedText);
+                return false;
             }
         } else {
-            console.log("⚠️ Sidebar iframe not found or not ready, trying alternative update");
+            console.log("⚠️ Sidebar iframe not found or not ready, details:");
+            console.log("  - sidebar element exists:", !!sidebar);
+            if (sidebar) {
+                console.log("  - contentWindow exists:", !!sidebar.contentWindow);
+                console.log("  - src:", sidebar.src);
+            }
+            console.log("⚠️ Trying alternative update method...");
             updateSidebarAlternative(word, sentence, selectedText);
+            return false;
         }
     }
     
@@ -1162,14 +1061,14 @@ if (window.translatorExtensionLoaded) {
     function hideSidebar() {
         const sidebar = document.getElementById("translator-sidebar");
         if (sidebar) {
-            sidebar.style.transform = "translateX(300px)";
+            sidebar.style.transform = "translateX(400px)";
             sidebarVisible = false;
         }
         
         // Also check for alternative container
         const altContainer = document.getElementById("translator-sidebar-container");
         if (altContainer) {
-            altContainer.style.transform = "translateX(300px)";
+            altContainer.style.transform = "translateX(400px)";
             sidebarVisible = false;
         }
     }
@@ -1362,7 +1261,7 @@ if (window.translatorExtensionLoaded) {
         const selectedText = selection.toString().trim();
         
         console.log("✅ Processing selection attempt:", selectedText.substring(0, 50) + "...");
-        console.log("🔍 Previous processed selection:", lastProcessedSelection.substring(0, 50) + "...");
+        console.log("🔍 Previous processed selection:", (lastProcessedSelection || "none").substring(0, 50) + "...");
         
         // Check if mouse is still down - if so, user is still selecting
         if (isMouseDown) {
@@ -1374,16 +1273,9 @@ if (window.translatorExtensionLoaded) {
         const now = Date.now();
         const timeSinceLastProcessing = now - (window.lastProcessingTime || 0);
         
-        if (selectedText === lastProcessedSelection && timeSinceLastProcessing < 2000) {
-            console.log("🚫 Skipping duplicate selection (same text within 2 seconds)");
+        if (selectedText === lastProcessedSelection && timeSinceLastProcessing < 1000) {
+            console.log("🚫 Skipping duplicate selection (same text within 1 second)");
             return;
-        }
-        
-        // Reset previous state for new selection
-        if (selectedText !== lastProcessedSelection) {
-            console.log("🆕 New selection detected, resetting previous state");
-            lastProcessedSelection = "";
-            window.lastProcessingTime = 0;
         }
         
         console.log("✅ Processing new selection:", selectedText.substring(0, 50) + "...");
@@ -1424,10 +1316,6 @@ if (window.translatorExtensionLoaded) {
         currentWord = word;
         currentSentence = sentence;
         
-        // Mark as processed
-        lastProcessedSelection = selectedText;
-        window.lastProcessingTime = now;
-        
         // Create sidebar if it doesn't exist
         let needsCreation = true;
         
@@ -1456,8 +1344,13 @@ if (window.translatorExtensionLoaded) {
         
         // Update sidebar with the selection - include mouse state info
         console.log("📤 Updating sidebar with selection:", word);
-        updateSidebar(word, sentence, selectedText);
+        const updateResult = updateSidebar(word, sentence, selectedText);
         console.log("📤 Sent to sidebar - Word:", word, "Sentence length:", sentence.length);
+        
+        // Only mark as processed after successful update attempt
+        lastProcessedSelection = selectedText;
+        window.lastProcessingTime = now;
+        console.log("✅ Marked selection as processed:", selectedText.substring(0, 30) + "...");
     }
 
     // Listen for selection changes

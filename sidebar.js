@@ -21,6 +21,32 @@ const modalClose = document.getElementById("modal-close");
 const modalCancel = document.getElementById("modal-cancel");
 const modalSave = document.getElementById("modal-save");
 
+// Auth-related DOM elements
+const authContainer = document.getElementById("auth-container");
+const authLoggedOut = document.getElementById("auth-logged-out");
+const authLoggedIn = document.getElementById("auth-logged-in");
+const showSigninButton = document.getElementById("show-signin-button");
+const showSignupButton = document.getElementById("show-signup-button");
+const signinForm = document.getElementById("signin-form");
+const signupForm = document.getElementById("signup-form");
+const signinSubmit = document.getElementById("signin-submit");
+const signinCancel = document.getElementById("signin-cancel");
+const signupSubmit = document.getElementById("signup-submit");
+const signupCancel = document.getElementById("signup-cancel");
+const signoutButton = document.getElementById("signout-button");
+const forceSyncButton = document.getElementById("force-sync-button");
+const userEmail = document.getElementById("user-email");
+const syncStatus = document.getElementById("sync-status");
+const syncIndicator = document.getElementById("sync-indicator");
+const signinMessage = document.getElementById("signin-message");
+const signupMessage = document.getElementById("signup-message");
+const syncMessage = document.getElementById("sync-message");
+
+// Auth state management
+let isAuthenticated = false;
+let currentUser = null;
+let syncEnabled = false;
+
 // Default settings
 let settings = {
     maxWordCount: 25, // Default maximum word count for translation
@@ -131,6 +157,411 @@ function processGeminiQueue() {
 function queueGeminiRequest(requestFunction) {
     geminiRequestQueue.push({ execute: requestFunction });
     processGeminiQueue();
+}
+
+// ====================
+// AUTHENTICATION & SYNC
+// ====================
+
+// Check authentication status and update UI
+async function checkAuthStatus() {
+    console.log('🔐 Checking authentication status...');
+    
+    try {
+        // Initialize Supabase client
+        if (typeof window.SupabaseAuth === 'undefined') {
+            console.warn('🔐 Supabase auth not available, operating in local mode');
+            updateAuthUI(false);
+            return;
+        }
+        
+        const user = await window.SupabaseAuth.getCurrentUser();
+        
+        if (user) {
+            console.log('🔐 User authenticated:', user.email);
+            isAuthenticated = true;
+            currentUser = user;
+            syncEnabled = true;
+            updateAuthUI(true);
+            
+            // Load data from Supabase
+            await syncFromSupabase();
+        } else {
+            console.log('🔐 User not authenticated');
+            isAuthenticated = false;
+            currentUser = null;
+            syncEnabled = false;
+            updateAuthUI(false);
+        }
+    } catch (error) {
+        console.error('🔐 Error checking auth status:', error);
+        isAuthenticated = false;
+        currentUser = null;
+        syncEnabled = false;
+        updateAuthUI(false);
+    }
+}
+
+// Update authentication UI
+function updateAuthUI(authenticated) {
+    if (!authLoggedOut || !authLoggedIn) {
+        console.warn('🔐 Auth UI elements not found');
+        return;
+    }
+    
+    if (authenticated && currentUser) {
+        authLoggedOut.classList.add('hidden');
+        authLoggedIn.classList.remove('hidden');
+        
+        if (userEmail) {
+            userEmail.textContent = currentUser.email;
+        }
+        
+        if (syncIndicator) {
+            syncIndicator.textContent = '☁️ Synced';
+            syncIndicator.className = 'sync-indicator synced';
+        }
+        
+        console.log('🔐 Updated UI for authenticated user');
+    } else {
+        authLoggedOut.classList.remove('hidden');
+        authLoggedIn.classList.add('hidden');
+        
+        if (syncIndicator) {
+            syncIndicator.textContent = 'Local';
+            syncIndicator.className = 'sync-indicator';
+        }
+        
+        console.log('🔐 Updated UI for unauthenticated user');
+    }
+}
+
+// Handle sign up
+async function handleSignUp() {
+    const email = document.getElementById('signup-email')?.value;
+    const password = document.getElementById('signup-password')?.value;
+    const confirmPassword = document.getElementById('signup-confirm-password')?.value;
+    
+    if (!email || !password || !confirmPassword) {
+        showAuthMessage(signupMessage, 'Please fill in all fields.', 'error');
+        return;
+    }
+    
+    if (password !== confirmPassword) {
+        showAuthMessage(signupMessage, 'Passwords do not match.', 'error');
+        return;
+    }
+    
+    if (password.length < 6) {
+        showAuthMessage(signupMessage, 'Password must be at least 6 characters long.', 'error');
+        return;
+    }
+    
+    try {
+        showAuthMessage(signupMessage, 'Creating account...', 'info');
+        signupSubmit.disabled = true;
+        
+        const { data, error } = await window.SupabaseAuth.signUp(email, password);
+        
+        if (error) {
+            showAuthMessage(signupMessage, error, 'error');
+        } else {
+            showAuthMessage(signupMessage, 'Account created! Please check your email for verification.', 'success');
+            
+            // Clear form
+            document.getElementById('signup-email').value = '';
+            document.getElementById('signup-password').value = '';
+            document.getElementById('signup-confirm-password').value = '';
+            
+            // Hide form after successful signup
+            setTimeout(() => {
+                hideAuthForms();
+            }, 2000);
+        }
+    } catch (err) {
+        console.error('🔐 Sign up error:', err);
+        showAuthMessage(signupMessage, 'Failed to create account. Please try again.', 'error');
+    } finally {
+        signupSubmit.disabled = false;
+    }
+}
+
+// Handle sign in
+async function handleSignIn() {
+    const email = document.getElementById('signin-email')?.value;
+    const password = document.getElementById('signin-password')?.value;
+    
+    if (!email || !password) {
+        showAuthMessage(signinMessage, 'Please enter both email and password.', 'error');
+        return;
+    }
+    
+    try {
+        showAuthMessage(signinMessage, 'Signing in...', 'info');
+        signinSubmit.disabled = true;
+        
+        const { data, error } = await window.SupabaseAuth.signIn(email, password);
+        
+        if (error) {
+            showAuthMessage(signinMessage, error, 'error');
+        } else {
+            showAuthMessage(signinMessage, 'Signed in successfully!', 'success');
+            
+            // Clear form
+            document.getElementById('signin-email').value = '';
+            document.getElementById('signin-password').value = '';
+            
+            // Update auth status
+            await checkAuthStatus();
+            
+            // Hide form
+            hideAuthForms();
+        }
+    } catch (err) {
+        console.error('🔐 Sign in error:', err);
+        showAuthMessage(signinMessage, 'Failed to sign in. Please try again.', 'error');
+    } finally {
+        signinSubmit.disabled = false;
+    }
+}
+
+// Handle sign out
+async function handleSignOut() {
+    try {
+        const { error } = await window.SupabaseAuth.signOut();
+        
+        if (error) {
+            console.error('🔐 Sign out error:', error);
+            showSyncMessage('Failed to sign out. Please try again.', 'error');
+        } else {
+            console.log('🔐 Signed out successfully');
+            isAuthenticated = false;
+            currentUser = null;
+            syncEnabled = false;
+            updateAuthUI(false);
+            showSyncMessage('Signed out successfully.', 'success');
+        }
+    } catch (err) {
+        console.error('🔐 Sign out exception:', err);
+        showSyncMessage('Failed to sign out. Please try again.', 'error');
+    }
+}
+
+// Sync data to Supabase
+async function syncToSupabase() {
+    if (!isAuthenticated || !syncEnabled) {
+        console.log('🔄 Sync to Supabase skipped - not authenticated');
+        return;
+    }
+    
+    try {
+        console.log('🔄 Syncing data to Supabase...');
+        
+        if (syncStatus) {
+            syncStatus.textContent = '⏳ Syncing...';
+            syncStatus.className = 'sync-status syncing';
+        }
+        
+        // Save global settings
+        const settingsResult = await window.SupabaseAuth.saveUserSettings(settings);
+        if (settingsResult.error) {
+            throw new Error(`Settings sync failed: ${settingsResult.error}`);
+        }
+        
+        // Save all profiles
+        const profilePromises = Object.entries(profiles).map(([profileName, profileSettings]) => {
+            const isCurrent = profileName === currentProfileName;
+            return window.SupabaseAuth.saveUserProfile(profileName, profileSettings, isCurrent);
+        });
+        
+        const profileResults = await Promise.all(profilePromises);
+        const failedProfiles = profileResults.filter(result => result.error);
+        
+        if (failedProfiles.length > 0) {
+            throw new Error(`Profile sync failed for ${failedProfiles.length} profiles`);
+        }
+        
+        console.log('🔄 Data synced to Supabase successfully');
+        
+        if (syncStatus) {
+            syncStatus.textContent = '✓ Synced';
+            syncStatus.className = 'sync-status';
+        }
+        
+        if (syncIndicator) {
+            syncIndicator.textContent = '☁️ Synced';
+            syncIndicator.className = 'sync-indicator synced';
+        }
+        
+        showSyncMessage('Data synced to cloud successfully.', 'success');
+        
+    } catch (error) {
+        console.error('🔄 Sync to Supabase failed:', error);
+        
+        if (syncStatus) {
+            syncStatus.textContent = '❌ Sync Failed';
+            syncStatus.className = 'sync-status error';
+        }
+        
+        if (syncIndicator) {
+            syncIndicator.textContent = '❌ Error';
+            syncIndicator.className = 'sync-indicator error';
+        }
+        
+        showSyncMessage(`Sync failed: ${error.message}`, 'error');
+    }
+}
+
+// Sync data from Supabase
+async function syncFromSupabase() {
+    if (!isAuthenticated || !syncEnabled) {
+        console.log('🔄 Sync from Supabase skipped - not authenticated');
+        return;
+    }
+    
+    try {
+        console.log('🔄 Loading data from Supabase...');
+        
+        if (syncStatus) {
+            syncStatus.textContent = '⏳ Loading...';
+            syncStatus.className = 'sync-status syncing';
+        }
+        
+        // Load global settings
+        const settingsResult = await window.SupabaseAuth.loadUserSettings();
+        if (settingsResult.error && settingsResult.error !== 'User not authenticated') {
+            throw new Error(`Settings load failed: ${settingsResult.error}`);
+        }
+        
+        if (settingsResult.data) {
+            // Merge remote settings with local defaults
+            settings = {
+                ...settings,
+                maxWordCount: settingsResult.data.max_word_count || settings.maxWordCount,
+                defaultTargetLanguage: settingsResult.data.default_target_language || settings.defaultTargetLanguage,
+                enabledProviders: {
+                    ...settings.enabledProviders,
+                    ...settingsResult.data.enabled_providers
+                },
+                apiKeys: {
+                    ...settings.apiKeys,
+                    ...settingsResult.data.api_keys
+                }
+            };
+            
+            console.log('🔄 Loaded settings from Supabase');
+        }
+        
+        // Load profiles
+        const profilesResult = await window.SupabaseAuth.loadUserProfiles();
+        if (profilesResult.error && profilesResult.error !== 'User not authenticated') {
+            throw new Error(`Profiles load failed: ${profilesResult.error}`);
+        }
+        
+        if (profilesResult.data && profilesResult.data.length > 0) {
+            profiles = {};
+            let foundCurrentProfile = false;
+            
+            profilesResult.data.forEach(profile => {
+                profiles[profile.profile_name] = profile.settings;
+                if (profile.is_current) {
+                    currentProfileName = profile.profile_name;
+                    foundCurrentProfile = true;
+                }
+            });
+            
+            // If no current profile was marked, use the first one
+            if (!foundCurrentProfile && Object.keys(profiles).length > 0) {
+                currentProfileName = Object.keys(profiles)[0];
+            }
+            
+            console.log('🔄 Loaded profiles from Supabase:', Object.keys(profiles));
+        }
+        
+        // Update UI
+        updateSettingsUI();
+        updateProfileDropdown();
+        updateProfilesList();
+        restoreTranslationBoxes();
+        
+        if (syncStatus) {
+            syncStatus.textContent = '✓ Synced';
+            syncStatus.className = 'sync-status';
+        }
+        
+        if (syncIndicator) {
+            syncIndicator.textContent = '☁️ Synced';
+            syncIndicator.className = 'sync-indicator synced';
+        }
+        
+        console.log('🔄 Data loaded from Supabase successfully');
+        showSyncMessage('Data loaded from cloud successfully.', 'success');
+        
+    } catch (error) {
+        console.error('🔄 Sync from Supabase failed:', error);
+        
+        if (syncStatus) {
+            syncStatus.textContent = '❌ Load Failed';
+            syncStatus.className = 'sync-status error';
+        }
+        
+        if (syncIndicator) {
+            syncIndicator.textContent = '❌ Error';
+            syncIndicator.className = 'sync-indicator error';
+        }
+        
+        showSyncMessage(`Load failed: ${error.message}`, 'error');
+    }
+}
+
+// Show authentication message
+function showAuthMessage(element, message, type) {
+    if (!element) return;
+    
+    element.textContent = message;
+    element.className = `auth-message ${type}`;
+    element.style.display = 'block';
+    
+    // Auto-hide success messages after 3 seconds
+    if (type === 'success') {
+        setTimeout(() => {
+            element.style.display = 'none';
+        }, 3000);
+    }
+}
+
+// Show sync message
+function showSyncMessage(message, type) {
+    if (!syncMessage) return;
+    
+    syncMessage.textContent = message;
+    syncMessage.className = `sync-message ${type}`;
+    syncMessage.style.display = 'block';
+    
+    // Auto-hide messages after 3 seconds
+    setTimeout(() => {
+        syncMessage.style.display = 'none';
+    }, 3000);
+}
+
+// Show/hide auth forms
+function showSignInForm() {
+    hideAuthForms();
+    signinForm.classList.remove('hidden');
+}
+
+function showSignUpForm() {
+    hideAuthForms();
+    signupForm.classList.remove('hidden');
+}
+
+function hideAuthForms() {
+    signinForm.classList.add('hidden');
+    signupForm.classList.add('hidden');
+    
+    // Clear messages
+    if (signinMessage) signinMessage.style.display = 'none';
+    if (signupMessage) signupMessage.style.display = 'none';
 }
 
 // ====================
@@ -587,6 +1018,13 @@ function initializeSidebar() {
     console.log('Running in iframe context:', window !== window.top);
     console.log('Chrome APIs available:', typeof chrome !== 'undefined' && !!chrome.runtime);
     
+    // Check if critical DOM elements exist
+    console.log('🔍 Checking critical DOM elements:');
+    console.log('  - selectionElement (#selection):', !!document.getElementById("selection"));
+    console.log('  - sentenceElement (#sentence):', !!document.getElementById("sentence"));
+    console.log('  - translationsContainer (#translations-container):', !!document.getElementById("translations-container"));
+    console.log('  - addTranslationButton (#add-translation-button):', !!document.getElementById("add-translation-button"));
+    
     // Ensure debug functions are available
     console.log('🔧 Debug functions available: forceRefreshDropdowns, debugTranslator, testGemini');
     
@@ -598,6 +1036,16 @@ function initializeSidebar() {
         // Load profiles and current profile
         console.log('Loading profiles...');
         loadProfiles();
+        
+        // Check authentication status and load cloud data if logged in
+        console.log('Checking authentication status...');
+        setTimeout(async () => {
+            try {
+                await checkAuthStatus();
+            } catch (error) {
+                console.error('Auth status check failed:', error);
+            }
+        }, 1000); // Give Supabase client time to initialize
         
         // Post a message to parent window to indicate sidebar is ready
         if (window.parent && window.parent !== window) {
@@ -739,329 +1187,343 @@ function saveTranslationBoxesLayout() {
         settings.translationBoxes.push(boxConfig);
     });
     
-    console.log('Saved translation boxes layout:', settings.translationBoxes);
+    console.log('SaveTranslationBoxesLayout: Saved layout:', settings.translationBoxes);
+    saveSettings();
+    
+    // Also sync to Supabase if authenticated
+    if (isAuthenticated && syncEnabled) {
+        syncToSupabase();
+    }
 }
 
-// Restore saved translation boxes
+// Restore translation boxes from settings
 function restoreTranslationBoxes() {
-    console.log('=== RESTORE TRANSLATION BOXES START ===');
-    console.log('Current settings object:', settings);
-    console.log('Translation boxes to restore:', settings.translationBoxes);
-    console.log('Enabled providers:', settings.enabledProviders);
+    console.log('RestoreTranslationBoxes: Restoring boxes from settings...');
+    console.log('RestoreTranslationBoxes: Settings boxes:', settings.translationBoxes);
     
-    // Clear existing boxes first
-    const existingBoxes = translationsContainer.querySelectorAll('.translation-box').length;
-    console.log('Clearing existing boxes, found:', existingBoxes);
-    translationsContainer.innerHTML = '';
+    // Clear existing boxes
+    if (translationsContainer) {
+        translationsContainer.innerHTML = '';
+    }
     
-    // If no saved boxes or empty array, add default Google box
+    // If no saved boxes, create default
     if (!settings.translationBoxes || settings.translationBoxes.length === 0) {
-        console.log('No saved translation boxes, adding default Google box');
-        addTranslationBox("google", settings.defaultTargetLanguage);
-        console.log('=== RESTORE TRANSLATION BOXES COMPLETE (DEFAULT) ===');
+        console.log('RestoreTranslationBoxes: No saved boxes, creating default');
+        const firstProvider = getFirstEnabledProvider();
+        addTranslationBox(firstProvider, settings.defaultTargetLanguage);
         return;
     }
     
-    console.log('Restoring saved translation boxes:', settings.translationBoxes);
-    
-    let restoredCount = 0;
-    
     // Restore each saved box
     settings.translationBoxes.forEach((boxConfig, index) => {
-        console.log(`Processing box ${index}:`, boxConfig);
+        console.log(`RestoreTranslationBoxes: Restoring box ${index + 1}:`, boxConfig);
         
-        // Check if provider exists in enabledProviders
-        if (!settings.enabledProviders.hasOwnProperty(boxConfig.provider)) {
-            console.warn(`Provider ${boxConfig.provider} not found in enabledProviders, skipping`);
-            return;
+        // Validate provider is still enabled
+        if (!settings.enabledProviders[boxConfig.provider]) {
+            console.warn(`RestoreTranslationBoxes: Provider ${boxConfig.provider} is disabled, using first enabled provider`);
+            boxConfig.provider = getFirstEnabledProvider();
         }
         
-        // Only restore if the provider is still enabled
-        if (settings.enabledProviders[boxConfig.provider]) {
-            console.log(`Restoring box for ${boxConfig.provider} with language ${boxConfig.targetLanguage}`);
-            addTranslationBox(boxConfig.provider, boxConfig.targetLanguage, boxConfig.model);
-            restoredCount++;
-        } else {
-            console.log(`Skipping disabled provider: ${boxConfig.provider}`);
-        }
+        addTranslationBox(
+            boxConfig.provider, 
+            boxConfig.targetLanguage || settings.defaultTargetLanguage,
+            boxConfig.model || null
+        );
     });
     
-    console.log(`Restored ${restoredCount} translation boxes`);
-    
-    // If no boxes were restored (all providers disabled), add default Google box
-    if (translationsContainer.children.length === 0) {
-        console.log('No enabled providers found, adding default Google box');
-        addTranslationBox("google", settings.defaultTargetLanguage);
-    }
-    
-    console.log('Final box count:', translationsContainer.children.length);
-    console.log('=== RESTORE TRANSLATION BOXES COMPLETE ===');
+    console.log('RestoreTranslationBoxes: Restoration complete');
 }
 
-// Update settings UI
+// Update settings UI with current values
 function updateSettingsUI() {
-    // Update word count setting
+    console.log('UpdateSettingsUI: Updating UI with current settings...');
+    
+    // Update max word count
     const maxWordCountInput = document.getElementById('max-word-count');
     if (maxWordCountInput) {
-        maxWordCountInput.value = settings.maxWordCount || 25;
+        maxWordCountInput.value = settings.maxWordCount;
     }
     
-    // Update checkboxes
+    // Update provider checkboxes and API keys
     for (const provider in settings.enabledProviders) {
         const checkbox = document.getElementById(`enable-${provider}`);
         if (checkbox) {
             checkbox.checked = settings.enabledProviders[provider];
         }
-    }
-    
-    // Update API key fields
-    for (const provider in settings.apiKeys) {
-        const input = document.getElementById(`${provider}-api-key`);
-        if (input) {
-            input.value = settings.apiKeys[provider];
+        
+        const apiKeyInput = document.getElementById(`${provider}-api-key`);
+        if (apiKeyInput) {
+            apiKeyInput.value = settings.apiKeys[provider] || '';
         }
     }
     
-    // Hide Google API key field (as it's not needed)
-    const googleApiField = document.querySelector('[data-provider="google"] .api-key-field');
-    if (googleApiField) {
-        googleApiField.classList.add('hidden');
-    }
+    console.log('UpdateSettingsUI: UI update complete');
 }
 
 // Setup event listeners
 function setupEventListeners() {
-    // Listen for messages from content script
-    window.addEventListener("message", handleContentScriptMessage);
+    console.log('SetupEventListeners: Setting up all event listeners...');
     
-    // Profile dropdown change
-    profileDropdown.addEventListener("change", (e) => {
-        if (e.target.value === "__create_new__") {
-            showProfileModal('create');
-            // Reset dropdown to current profile
-            setTimeout(() => {
-                updateProfileDropdown();
-            }, 100);
-        }
-    });
+    // Global settings button
+    if (globalSettingsButton) {
+        globalSettingsButton.addEventListener('click', () => {
+            console.log('Global settings button clicked');
+            appContainer.classList.add('settings-open');
+        });
+    }
     
-    // Load profile button
-    loadProfileButton.addEventListener("click", () => {
-        const selectedProfile = profileDropdown.value;
-        if (selectedProfile && selectedProfile !== "__create_new__" && profiles[selectedProfile]) {
-            loadProfile(selectedProfile);
-        } else {
-            alert('Please select a profile to load.');
-        }
-    });
-    
-    // Save profile button
-    saveProfileButton.addEventListener("click", () => {
-        const selectedProfile = profileDropdown.value;
-        if (selectedProfile && selectedProfile !== "__create_new__") {
-            saveToProfile(selectedProfile);
-            alert(`Profile "${selectedProfile}" saved successfully!`);
-        } else {
-            // Show modal to create new profile
-            showProfileModal('create');
-        }
-    });
-    
-    // Create profile button in settings
-    createProfileButton.addEventListener("click", () => {
-        showProfileModal('create');
-    });
-    
-    // Profile list actions (using event delegation)
-    profilesList.addEventListener("click", (e) => {
-        if (e.target.classList.contains('edit-profile')) {
-            const profileName = e.target.getAttribute('data-profile');
-            showProfileModal('edit', profileName);
-        } else if (e.target.classList.contains('delete-profile')) {
-            const profileName = e.target.getAttribute('data-profile');
-            if (confirm(`Are you sure you want to delete the profile "${profileName}"?`)) {
-                deleteProfile(profileName);
-            }
-        }
-    });
-    
-    // Modal event listeners
-    modalClose.addEventListener("click", hideProfileModal);
-    modalCancel.addEventListener("click", hideProfileModal);
-    modalSave.addEventListener("click", handleProfileModalSave);
-    
-    // Close modal on overlay click
-    profileModalOverlay.addEventListener("click", (e) => {
-        if (e.target === profileModalOverlay) {
-            hideProfileModal();
-        }
-    });
-    
-    // Close modal on Escape key
-    document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && !profileModalOverlay.classList.contains('hidden')) {
-            hideProfileModal();
-        }
-    });
-    
-    // Save on Enter in modal
-    profileNameInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-            handleProfileModalSave();
-        }
-    });
-    
-    // Add translation button
-    addTranslationButton.addEventListener("click", () => {
-        // Find first enabled provider that isn't already used
-        const usedProviders = Array.from(document.querySelectorAll('.translation-box')).map(
-            box => box.getAttribute('data-provider')
-        );
-        
-        let nextProvider = "google"; // Default
-        
-        for (const provider in settings.enabledProviders) {
-            if (settings.enabledProviders[provider] && !usedProviders.includes(provider)) {
-                nextProvider = provider;
-                break;
-            }
-        }
-        
-        addTranslationBox(nextProvider, settings.defaultTargetLanguage);
-        
-        // Save the updated layout
-        saveTranslationBoxesLayout();
-        
-        // Save to current profile if one is active
-        if (currentProfileName) {
-            saveToProfile(currentProfileName);
-        }
-    });
-    
-    // Global settings button - slide to settings page
-    globalSettingsButton.addEventListener("click", () => {
-        appContainer.classList.add("settings-open");
-    });
-    
-    // Back button - slide back to main page
-    backButton.addEventListener("click", () => {
-        appContainer.classList.remove("settings-open");
-    });
+    // Back button
+    if (backButton) {
+        backButton.addEventListener('click', () => {
+            console.log('Back button clicked');
+            appContainer.classList.remove('settings-open');
+        });
+    }
     
     // Save settings button
-    saveSettingsButton.addEventListener("click", () => {
-        console.log('💾 SAVE SETTINGS CLICKED');
-        
-        // Save word count setting
-        const maxWordCountInput = document.getElementById('max-word-count');
-        if (maxWordCountInput) {
-            settings.maxWordCount = parseInt(maxWordCountInput.value) || 25;
-        }
-        
-        // Save enabled status for each provider
-        for (const provider in settings.enabledProviders) {
-            const checkbox = document.getElementById(`enable-${provider}`);
-            if (checkbox) {
-                const wasEnabled = settings.enabledProviders[provider];
-                const isNowEnabled = checkbox.checked;
-                settings.enabledProviders[provider] = isNowEnabled;
-                
-                if (wasEnabled !== isNowEnabled) {
-                    console.log(`Provider ${provider} changed from ${wasEnabled} to ${isNowEnabled}`);
-                }
-            }
-        }
-        
-        // Save API keys
-        for (const provider in settings.apiKeys) {
-            const input = document.getElementById(`${provider}-api-key`);
-            if (input) {
-                settings.apiKeys[provider] = input.value;
-            }
-        }
-        
-        console.log('Settings after update:', settings);
-        
-        // Save to current profile if one is active
-        if (currentProfileName) {
-            saveToProfile(currentProfileName);
-        }
-        
-        // Slide back to main page
-        appContainer.classList.remove("settings-open");
-        
-        // Force refresh all dropdowns immediately
-        setTimeout(() => {
-            console.log('🔄 About to force refresh dropdowns...');
-            forceRefreshAllProviderDropdowns();
+    if (saveSettingsButton) {
+        saveSettingsButton.addEventListener('click', () => {
+            console.log('Save settings button clicked');
             
-            // Also call the regular refresh
-            refreshTranslationBoxes();
-        }, 100);
-        
-        // Send updated settings to content script
-        if (typeof chrome !== 'undefined' && chrome.tabs) {
-            chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
-                if (tabs[0]) {
-                    chrome.tabs.sendMessage(tabs[0].id, {
-                        action: "updateSettings",
-                        settings: { maxWordCount: settings.maxWordCount }
-                    });
+            // Get current settings from UI
+            const maxWordCountInput = document.getElementById('max-word-count');
+            if (maxWordCountInput) {
+                settings.maxWordCount = parseInt(maxWordCountInput.value) || 25;
+            }
+            
+            // Update provider settings
+            for (const provider in settings.enabledProviders) {
+                const checkbox = document.getElementById(`enable-${provider}`);
+                if (checkbox) {
+                    settings.enabledProviders[provider] = checkbox.checked;
                 }
-            });
-        }
-    });
+                
+                const apiKeyInput = document.getElementById(`${provider}-api-key`);
+                if (apiKeyInput) {
+                    settings.apiKeys[provider] = apiKeyInput.value;
+                }
+            }
+            
+            console.log('Settings updated:', settings);
+            saveSettings();
+            
+            // Refresh translation boxes to reflect new settings
+            refreshTranslationBoxes();
+            
+            // Sync to Supabase if authenticated
+            if (isAuthenticated && syncEnabled) {
+                syncToSupabase();
+            }
+            
+            // Show feedback
+            saveSettingsButton.textContent = 'Saved!';
+            setTimeout(() => {
+                saveSettingsButton.textContent = 'Save Settings';
+            }, 2000);
+        });
+    }
     
-    // Set up delegates for dynamic elements
-    translationsContainer.addEventListener("click", handleTranslationsContainerClick);
-    translationsContainer.addEventListener("change", handleTranslationsContainerChange);
+    // Add translation button
+    if (addTranslationButton) {
+        addTranslationButton.addEventListener('click', () => {
+            console.log('Add translation button clicked');
+            const firstProvider = getFirstEnabledProvider();
+            addTranslationBox(firstProvider, settings.defaultTargetLanguage);
+            saveTranslationBoxesLayout();
+        });
+    }
+    
+    // Translations container for dynamic events
+    if (translationsContainer) {
+        translationsContainer.addEventListener('click', handleTranslationsContainerClick);
+        translationsContainer.addEventListener('change', handleTranslationsContainerChange);
+    }
+    
+    // Profile management events
+    if (profileDropdown) {
+        profileDropdown.addEventListener('change', (e) => {
+            const selectedValue = e.target.value;
+            if (selectedValue === '__create_new__') {
+                showProfileModal('create');
+                e.target.value = currentProfileName || '';
+            }
+        });
+    }
+    
+    if (loadProfileButton) {
+        loadProfileButton.addEventListener('click', () => {
+            const selectedProfile = profileDropdown.value;
+            if (selectedProfile && selectedProfile !== '__create_new__') {
+                loadProfile(selectedProfile);
+            }
+        });
+    }
+    
+    if (saveProfileButton) {
+        saveProfileButton.addEventListener('click', () => {
+            const selectedProfile = profileDropdown.value;
+            if (selectedProfile && selectedProfile !== '__create_new__') {
+                saveToProfile(selectedProfile);
+            }
+        });
+    }
+    
+    if (createProfileButton) {
+        createProfileButton.addEventListener('click', () => {
+            showProfileModal('create');
+        });
+    }
+    
+    // Profile modal events
+    if (modalClose) {
+        modalClose.addEventListener('click', hideProfileModal);
+    }
+    
+    if (modalCancel) {
+        modalCancel.addEventListener('click', hideProfileModal);
+    }
+    
+    if (modalSave) {
+        modalSave.addEventListener('click', handleProfileModalSave);
+    }
+    
+    if (profileNameInput) {
+        profileNameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleProfileModalSave();
+            }
+        });
+    }
+    
+    // Profile list events (delegated)
+    if (profilesList) {
+        profilesList.addEventListener('click', (e) => {
+            if (e.target.classList.contains('edit-profile')) {
+                const profileName = e.target.getAttribute('data-profile');
+                showProfileModal('edit', profileName);
+            } else if (e.target.classList.contains('delete-profile')) {
+                const profileName = e.target.getAttribute('data-profile');
+                if (confirm(`Are you sure you want to delete the profile "${profileName}"?`)) {
+                    deleteProfile(profileName);
+                }
+            }
+        });
+    }
+    
+    // Authentication event listeners
+    if (showSigninButton) {
+        showSigninButton.addEventListener('click', showSignInForm);
+    }
+    
+    if (showSignupButton) {
+        showSignupButton.addEventListener('click', showSignUpForm);
+    }
+    
+    if (signinSubmit) {
+        signinSubmit.addEventListener('click', handleSignIn);
+    }
+    
+    if (signinCancel) {
+        signinCancel.addEventListener('click', hideAuthForms);
+    }
+    
+    if (signupSubmit) {
+        signupSubmit.addEventListener('click', handleSignUp);
+    }
+    
+    if (signupCancel) {
+        signupCancel.addEventListener('click', hideAuthForms);
+    }
+    
+    if (signoutButton) {
+        signoutButton.addEventListener('click', handleSignOut);
+    }
+    
+    if (forceSyncButton) {
+        forceSyncButton.addEventListener('click', () => {
+            if (isAuthenticated && syncEnabled) {
+                syncToSupabase();
+            }
+        });
+    }
+    
+    // Listen for messages from content script
+    window.addEventListener('message', handleContentScriptMessage);
+    
+    console.log('SetupEventListeners: All event listeners set up successfully');
 }
 
-// Handle messages from content script (with proper iframe messaging)
+// Handle messages from content script
 function handleContentScriptMessage(event) {
-    // Ensure we only handle messages from our content script
-    if (event.origin !== window.location.origin && event.source !== window.parent) {
+    console.log('🔍 Sidebar received message:', event);
+    console.log('🔍 Message origin:', event.origin);
+    console.log('🔍 Window location origin:', window.location.origin);
+    console.log('🔍 Message data:', event.data);
+    
+    const data = event.data;
+    if (!data || data.source !== 'translatorContentScript') {
+        console.log('🚫 Message rejected due to invalid source or no data:', data);
         return;
     }
     
-    const data = event.data;
+    // Skip origin verification for extension sidebar - we only check the source property
+    // since the sidebar should accept messages from any webpage where the extension is active
+    console.log('✅ Received valid message from content script:', data);
     
-    // Handle different message types
-    if (data && data.type === "translateWord") {
-        currentWord = data.word || "";
-        currentSentence = data.sentence || "";
-        const isMouseDown = data.isMouseDown || false;
-        
-        // Update UI immediately
-        if (selectionElement) {
-            selectionElement.textContent = currentWord;
-        }
-        if (sentenceElement) {
-            sentenceElement.textContent = currentSentence;
-        }
-        
-        // Only trigger translation if mouse is not down (user finished selecting)
-        if (isMouseDown) {
-            console.log("🖱️ Mouse still down, not triggering translation yet");
-            // Clear any pending translation since user is still selecting
-            if (translationDebounceTimer) {
-                clearTimeout(translationDebounceTimer);
-                translationDebounceTimer = null;
+    switch (data.type) {
+        case 'textSelected':
+            console.log('📝 Processing textSelected message');
+            currentWord = data.selectedText || '';
+            currentSentence = data.sentence || '';
+            
+            console.log('📝 Updated currentWord:', currentWord);
+            console.log('📝 Updated currentSentence:', currentSentence);
+            
+            // Update UI
+            if (selectionElement) {
+                selectionElement.textContent = currentWord || 'Select text to translate';
+                console.log('✅ Updated selection element');
+            } else {
+                console.log('❌ Selection element not found');
             }
-            return;
-        }
-        
-        // Use debounced translation to prevent rapid-fire API requests
-        // This will wait 500ms after the last selection change before translating
-        console.log("✅ Mouse released, triggering debounced translation");
-        debouncedTranslateAllBoxes();
+            
+            if (sentenceElement) {
+                sentenceElement.textContent = currentSentence;
+                console.log('✅ Updated sentence element');
+            } else {
+                console.log('❌ Sentence element not found');
+            }
+            
+            // Trigger translation with debouncing
+            if (currentWord) {
+                console.log('🎯 Triggering translation for:', currentWord);
+                debouncedTranslateAllBoxes();
+            }
+            break;
+            
+        case 'selectionCleared':
+            console.log('🧹 Processing selectionCleared message');
+            currentWord = '';
+            currentSentence = '';
+            
+            if (selectionElement) {
+                selectionElement.textContent = 'Select text to translate';
+            }
+            if (sentenceElement) {
+                sentenceElement.textContent = '';
+            }
+            break;
     }
 }
 
 // Translate all visible translation boxes
 function translateAllBoxes() {
-    const boxes = document.querySelectorAll('.translation-box');
+    if (!currentWord) {
+        console.log('TranslateAllBoxes: No word selected, skipping translation');
+        return;
+    }
     
+    const boxes = document.querySelectorAll('.translation-box');
     boxes.forEach(box => {
         const provider = box.getAttribute('data-provider');
         const langSelect = box.querySelector('.language-select');
@@ -1071,495 +1533,313 @@ function translateAllBoxes() {
     });
 }
 
-// Handle clicks on translation container elements
+// Handle clicks in translations container
 function handleTranslationsContainerClick(event) {
-    // Settings button click
-    if (event.target.closest('.settings-button')) {
-        const box = event.target.closest('.translation-box');
-        const settingsPanel = box.querySelector('.provider-settings');
-        settingsPanel.classList.toggle('hidden');
+    const target = event.target;
+    
+    // Check if target is a delete button or inside a delete button
+    const deleteButton = target.closest('.delete-button');
+    if (deleteButton) {
+        const box = deleteButton.closest('.translation-box');
+        if (box) {
+            box.remove();
+            saveTranslationBoxesLayout();
+        }
+        return;
     }
     
-    // Delete button click
-    if (event.target.closest('.delete-button')) {
-        const box = event.target.closest('.translation-box');
-        if (translationsContainer.querySelectorAll('.translation-box').length > 1) {
-            box.remove();
-            
-            // Save the updated layout
-            saveTranslationBoxesLayout();
-            
-            // Save to current profile if one is active
-            if (currentProfileName) {
-                saveToProfile(currentProfileName);
-            }
-        } else {
-            // Don't remove the last box, just reset it
-            const provider = box.getAttribute('data-provider');
-            const langSelect = box.querySelector('.language-select');
-            const targetLang = langSelect ? langSelect.value : settings.defaultTargetLanguage;
-            
-            // Reset the translation
-            const translationText = box.querySelector('.translation-text');
-            translationText.textContent = '';
+    // Check if target is a settings button or inside a settings button
+    const settingsButton = target.closest('.settings-button');
+    if (settingsButton) {
+        const box = settingsButton.closest('.translation-box');
+        const settings = box.querySelector('.provider-settings');
+        if (settings) {
+            const isCurrentlyHidden = settings.style.display === 'none' || !settings.style.display;
+            settings.style.display = isCurrentlyHidden ? 'block' : 'none';
         }
+        return;
     }
 }
 
-// Handle changes in the translation container elements
+// Handle changes in translations container
 function handleTranslationsContainerChange(event) {
-    // Provider selection change
-    if (event.target.classList.contains('provider-select')) {
-        const box = event.target.closest('.translation-box');
-        const newProvider = event.target.value;
+    const target = event.target;
+    
+    if (target.classList.contains('provider-select')) {
+        const box = target.closest('.translation-box');
+        const newProvider = target.value;
+        
+        // Update box data attribute
+        box.setAttribute('data-provider', newProvider);
+        
+        // Update model selector for AI providers
+        updateModelSelector(box, newProvider);
+        
+        // Retranslate with new provider
         const langSelect = box.querySelector('.language-select');
         const targetLang = langSelect ? langSelect.value : settings.defaultTargetLanguage;
-        
-        // Update box provider
-        box.setAttribute('data-provider', newProvider);
-        box.querySelector('.provider-name').textContent = providerNames[newProvider];
-        
-        // Update model selector visibility - add or remove model selector based on provider
-        const existingModelSelector = box.querySelector('.model-selector');
-        if (existingModelSelector) {
-            existingModelSelector.remove();
-        }
-        
-        // Add model selector for AI providers
-        if (newProvider === 'openai' || newProvider === 'claude' || newProvider === 'gemini') {
-            const langSelector = box.querySelector('.language-selector');
-            const boxId = box.id;
-            let modelSelectorHTML = '';
-            
-            if (newProvider === 'openai') {
-                modelSelectorHTML = `<div class="model-selector">
-                    <label for="model-select-${boxId}">Model:</label>
-                    <select class="model-select" id="model-select-${boxId}">
-                        <option value="gpt-4o">GPT-4o</option>
-                        <option value="gpt-4o-mini">GPT-4o mini</option>
-                        <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                        <option value="gpt-3.5-turbo" selected>GPT-3.5 Turbo</option>
-                    </select>
-                </div>`;
-            } else if (newProvider === 'claude') {
-                modelSelectorHTML = `<div class="model-selector">
-                    <label for="model-select-${boxId}">Model:</label>
-                    <select class="model-select" id="model-select-${boxId}">
-                        <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                        <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
-                        <option value="claude-3-haiku-20240307" selected>Claude 3 Haiku</option>
-                        <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
-                        <option value="claude-3-opus-20240229">Claude 3 Opus</option>
-                    </select>
-                </div>`;
-            } else if (newProvider === 'gemini') {
-                modelSelectorHTML = `<div class="model-selector">
-                    <label for="model-select-${boxId}">Model:</label>
-                    <select class="model-select" id="model-select-${boxId}">
-                        <option value="gemini-1.5-flash-latest" selected>Gemini 1.5 Flash</option>
-                        <option value="gemini-1.5-pro-latest">Gemini 1.5 Pro</option>
-                        <option value="gemini-1.0-pro">Gemini 1.0 Pro</option>
-                    </select>
-                </div>`;
-            }
-            
-            if (modelSelectorHTML) {
-                langSelector.insertAdjacentHTML('afterend', modelSelectorHTML);
-            }
-        }
-        
-        // Hide settings
-        const settingsPanel = box.querySelector('.provider-settings');
-        settingsPanel.classList.add('hidden');
-        
-        // Translate with new provider
         translateText(box, newProvider, targetLang);
         
-        // Save the updated layout
+        // Save layout
         saveTranslationBoxesLayout();
         
-        // Save to current profile if one is active
-        if (currentProfileName) {
-            saveToProfile(currentProfileName);
-        }
-    }
-    
-    // Language selection change
-    if (event.target.classList.contains('language-select')) {
-        const box = event.target.closest('.translation-box');
+    } else if (target.classList.contains('language-select')) {
+        const box = target.closest('.translation-box');
         const provider = box.getAttribute('data-provider');
-        const targetLang = event.target.value;
+        const newLang = target.value;
         
-        // Update language display
-        box.querySelector('.target-language').textContent = event.target.options[event.target.selectedIndex].text;
+        // Retranslate with new language
+        translateText(box, provider, newLang);
         
-        // Hide settings
-        const settingsPanel = box.querySelector('.provider-settings');
-        settingsPanel.classList.add('hidden');
-        
-        // Translate with new language
-        translateText(box, provider, targetLang);
-        
-        // Save the updated layout
+        // Save layout
         saveTranslationBoxesLayout();
         
-        // Save to current profile if one is active
-        if (currentProfileName) {
-            saveToProfile(currentProfileName);
-        }
-    }
-    
-    // Model selection change
-    if (event.target.classList.contains('model-select')) {
-        const box = event.target.closest('.translation-box');
+    } else if (target.classList.contains('model-select')) {
+        const box = target.closest('.translation-box');
         const provider = box.getAttribute('data-provider');
         const langSelect = box.querySelector('.language-select');
         const targetLang = langSelect ? langSelect.value : settings.defaultTargetLanguage;
         
-        // Hide settings
-        const settingsPanel = box.querySelector('.provider-settings');
-        settingsPanel.classList.add('hidden');
-        
-        // Translate with new model
+        // Retranslate with new model
         translateText(box, provider, targetLang);
         
-        // Save the updated layout
+        // Save layout
         saveTranslationBoxesLayout();
-        
-        // Save to current profile if one is active
-        if (currentProfileName) {
-            saveToProfile(currentProfileName);
-        }
     }
 }
 
 // Add a new translation box
 function addTranslationBox(provider, targetLang, model = null) {
+    if (!translationsContainer) return;
+    
     translationBoxCounter++;
-    const boxId = `translation-box-${translationBoxCounter}`;
     
-    // Create new translation box
-    const boxDiv = document.createElement('div');
-    boxDiv.className = 'translation-box';
-    boxDiv.setAttribute('data-provider', provider);
-    boxDiv.id = boxId;
-    
-    // Generate model selector HTML for AI providers
     const getModelSelectorHTML = (provider) => {
-        if (provider === 'openai') {
-            return `<div class="model-selector">
-                <label for="model-select-${boxId}">Model:</label>
-                <select class="model-select" id="model-select-${boxId}">
-                    <option value="gpt-4o">GPT-4o</option>
-                    <option value="gpt-4o-mini">GPT-4o mini</option>
-                    <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                    <option value="gpt-3.5-turbo" selected>GPT-3.5 Turbo</option>
+        const aiProviders = ['openai', 'claude', 'gemini'];
+        if (!aiProviders.includes(provider)) return '';
+        
+        const models = {
+            openai: ['gpt-4', 'gpt-3.5-turbo'],
+            claude: ['claude-3-sonnet-20240229', 'claude-3-haiku-20240307'],
+            gemini: ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash']
+        };
+        
+        const providerModels = models[provider] || [];
+        const selectedModel = model || providerModels[0] || '';
+        
+        return `
+            <div class="model-selector">
+                <label for="model-select-${translationBoxCounter}">Model:</label>
+                <select class="model-select" id="model-select-${translationBoxCounter}">
+                    ${providerModels.map(m => `<option value="${m}" ${m === selectedModel ? 'selected' : ''}>${m}</option>`).join('')}
                 </select>
-            </div>`;
-        } else if (provider === 'claude') {
-            return `<div class="model-selector">
-                <label for="model-select-${boxId}">Model:</label>
-                <select class="model-select" id="model-select-${boxId}">
-                    <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                    <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
-                    <option value="claude-3-haiku-20240307" selected>Claude 3 Haiku</option>
-                    <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
-                    <option value="claude-3-opus-20240229">Claude 3 Opus</option>
-                </select>
-            </div>`;
-        } else if (provider === 'gemini') {
-            return `<div class="model-selector">
-                <label for="model-select-${boxId}">Model:</label>
-                <select class="model-select" id="model-select-${boxId}">
-                    <option value="gemini-1.5-flash-latest" selected>Gemini 1.5 Flash</option>
-                    <option value="gemini-1.5-pro-latest">Gemini 1.5 Pro</option>
-                    <option value="gemini-1.0-pro">Gemini 1.0 Pro</option>
-                </select>
-            </div>`;
-        }
-        return '';
+            </div>
+        `;
     };
     
-    // When generating provider settings, exclude API key field for Google
-    const providerSettingsHTML = `<div class="provider-settings hidden">
-        <div class="provider-selector">
-            <label for="provider-select-${boxId}">Translation service:</label>
-            <select class="provider-select" id="provider-select-${boxId}">
-                ${generateProviderOptions(provider)}
-            </select>
-        </div>
-        <div class="language-selector">
-            <label for="language-select-${boxId}">Target language:</label>
-            <select class="language-select" id="language-select-${boxId}">
-                ${generateLanguageOptions(provider, targetLang)}
-            </select>
-        </div>
-        ${getModelSelectorHTML(provider)}
-        ${provider !== 'google' ? 
-        `<div class="api-key-reminder">
-            <small>API key required in global settings</small>
-        </div>` : ''}
-    </div>`;
+    const box = document.createElement('div');
+    box.className = 'translation-box';
+    box.setAttribute('data-provider', provider);
     
-    // Use the proper HTML with conditional API key reminders
-    boxDiv.innerHTML = `
+    box.innerHTML = `
         <div class="translation-header">
             <div class="provider-info">
-                <span class="provider-name">${providerNames[provider]}</span>
+                <span class="provider-name">${providerNames[provider] || provider}</span>
                 <span class="target-language">${getLanguageName(targetLang)}</span>
             </div>
             <div class="translation-controls">
-                <button class="settings-button" title="Translation settings">
+                <button class="settings-button" title="Settings">
                     <svg width="16" height="16" viewBox="0 0 24 24">
                         <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
                     </svg>
                 </button>
-                <button class="delete-button" title="Remove translation">
+                <button class="delete-button" title="Delete">
                     <svg width="16" height="16" viewBox="0 0 24 24">
-                        <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                        <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
                     </svg>
                 </button>
             </div>
         </div>
         <div class="translation-content">
-            <div class="translation-loading-indicator hidden">Переводим...</div>
-            <div class="translation-text"></div>
-            <div class="translation-error hidden">Ошибка перевода. Пожалуйста, попробуйте еще раз.</div>
+            <div class="translation-loading-indicator">Ready to translate...</div>
         </div>
-        ${providerSettingsHTML}
+        <div class="provider-settings" style="display: none;">
+            <div class="provider-selector">
+                <label for="provider-select-${translationBoxCounter}">Provider:</label>
+                <select class="provider-select" id="provider-select-${translationBoxCounter}">
+                    ${generateProviderOptions(provider)}
+                </select>
+            </div>
+            <div class="language-selector">
+                <label for="language-select-${translationBoxCounter}">Target Language:</label>
+                <select class="language-select" id="language-select-${translationBoxCounter}">
+                    ${generateLanguageOptions(provider, targetLang)}
+                </select>
+            </div>
+            ${getModelSelectorHTML(provider)}
+            <div class="api-key-reminder">
+                ${settings.apiKeys[provider] ? '✓ API key configured' : '⚠️ API key required in settings'}
+            </div>
+        </div>
     `;
     
-    // Add box to container
-    translationsContainer.appendChild(boxDiv);
+    translationsContainer.appendChild(box);
     
-    // Set the model if provided and it's an AI provider
-    if (model && (provider === 'openai' || provider === 'claude' || provider === 'gemini')) {
-        const modelSelect = boxDiv.querySelector('.model-select');
-        if (modelSelect) {
-            // Check if the model value exists in the options
-            const modelOption = Array.from(modelSelect.options).find(option => option.value === model);
-            if (modelOption) {
-                modelSelect.value = model;
-                console.log(`Set model to ${model} for ${provider} provider`);
-            } else {
-                console.warn(`Model ${model} not found in options for ${provider}, using default`);
-            }
-        }
-    }
-    
-    // Translate if we have a word
+    // Translate immediately if we have text
     if (currentWord) {
-        translateText(boxDiv, provider, targetLang);
+        translateText(box, provider, targetLang);
     }
 }
 
-// Generate HTML options for provider select
+// Generate provider options HTML
 function generateProviderOptions(selectedProvider) {
-    console.log('=== GENERATE PROVIDER OPTIONS ===');
-    console.log('Selected provider:', selectedProvider);
-    console.log('Available providers in settings:', Object.keys(settings.enabledProviders));
-    console.log('Enabled providers:', Object.entries(settings.enabledProviders).filter(([provider, enabled]) => enabled).map(([provider]) => provider));
-    
     let options = '';
-    
     for (const provider in settings.enabledProviders) {
         if (settings.enabledProviders[provider]) {
-            console.log(`Adding provider option: ${provider} (${providerNames[provider]})`);
-            options += `<option value="${provider}" ${provider === selectedProvider ? 'selected' : ''}>
-                ${providerNames[provider]}
-            </option>`;
-        } else {
-            console.log(`Skipping disabled provider: ${provider}`);
+            const selected = provider === selectedProvider ? 'selected' : '';
+            options += `<option value="${provider}" ${selected}>${providerNames[provider] || provider}</option>`;
         }
     }
-    
-    console.log('Final options HTML:', options);
     return options;
 }
 
-// Generate HTML options for language select
+// Generate language options HTML
 function generateLanguageOptions(provider, selectedLang) {
-    let options = '';
     const languages = supportedLanguages[provider] || supportedLanguages.google;
-    
-    for (const lang of languages) {
-        options += `<option value="${lang}" ${lang === selectedLang ? 'selected' : ''}>
-            ${getLanguageName(lang)}
-        </option>`;
-    }
-    
+    let options = '';
+    languages.forEach(lang => {
+        const selected = lang === selectedLang ? 'selected' : '';
+        options += `<option value="${lang}" ${selected}>${getLanguageName(lang)}</option>`;
+    });
     return options;
 }
 
-// Get human-readable language name
+// Get language display name
 function getLanguageName(langCode) {
-    const languages = {
-        ru: "Russian",
-        en: "English",
-        de: "German",
-        fr: "French",
-        es: "Spanish",
-        zh: "Chinese",
-        ja: "Japanese"
+    const languageNames = {
+        'ru': 'Russian',
+        'en': 'English',
+        'de': 'German',
+        'fr': 'French',
+        'es': 'Spanish',
+        'zh': 'Chinese',
+        'ja': 'Japanese'
     };
-    
-    return languages[langCode] || langCode;
+    return languageNames[langCode] || langCode;
 }
 
-// Refresh translation boxes based on settings
+// Refresh all translation boxes (when settings change)
 function refreshTranslationBoxes() {
-    console.log('=== REFRESH TRANSLATION BOXES START ===');
-    console.log('Current enabled providers:', settings.enabledProviders);
+    console.log('RefreshTranslationBoxes: Refreshing all translation boxes...');
     
-    // Get current boxes
     const boxes = document.querySelectorAll('.translation-box');
-    console.log('Found translation boxes:', boxes.length);
-    
-    // Update all boxes to reflect current settings
-    boxes.forEach((box, index) => {
+    boxes.forEach(box => {
         const provider = box.getAttribute('data-provider');
-        console.log(`Processing box ${index + 1}: current provider = ${provider}`);
         
-        // Always refresh provider dropdown options to include newly enabled providers
-        const providerSelect = box.querySelector('.provider-select');
-        if (providerSelect) {
-            const currentValue = providerSelect.value || provider;
-            console.log(`Updating provider dropdown for box ${index + 1}, current value: ${currentValue}`);
+        // Check if provider is still enabled
+        if (!settings.enabledProviders[provider]) {
+            console.log(`RefreshTranslationBoxes: Provider ${provider} disabled, switching to first enabled`);
+            const newProvider = getFirstEnabledProvider();
+            box.setAttribute('data-provider', newProvider);
             
-            const newOptions = generateProviderOptions(currentValue);
-            console.log(`Generated options for box ${index + 1}:`, newOptions);
+            // Update provider name in header
+            const providerNameElement = box.querySelector('.provider-name');
+            if (providerNameElement) {
+                providerNameElement.textContent = providerNames[newProvider] || newProvider;
+            }
             
-            providerSelect.innerHTML = newOptions;
+            // Update provider select
+            const providerSelect = box.querySelector('.provider-select');
+            if (providerSelect) {
+                providerSelect.innerHTML = generateProviderOptions(newProvider);
+                providerSelect.value = newProvider;
+            }
+            
+            // Update model selector
+            updateModelSelector(box, newProvider);
         } else {
-            console.log(`No provider select found for box ${index + 1}`);
+            // Just refresh the provider options
+            const providerSelect = box.querySelector('.provider-select');
+            if (providerSelect) {
+                const currentValue = providerSelect.value;
+                providerSelect.innerHTML = generateProviderOptions(currentValue);
+                providerSelect.value = currentValue;
+            }
         }
         
-        // Check if current provider is still enabled
-        if (!settings.enabledProviders[provider]) {
-            console.log(`Provider ${provider} is disabled, switching to enabled provider`);
-            // Provider is disabled, need to change to an enabled one
-            const newProvider = getFirstEnabledProvider();
-            
-            if (newProvider) {
-                // Update box to use new provider
-                box.setAttribute('data-provider', newProvider);
-                box.querySelector('.provider-name').textContent = providerNames[newProvider];
-                
-                // Update provider dropdown
-                if (providerSelect) {
-                    providerSelect.innerHTML = generateProviderOptions(newProvider);
-                    providerSelect.value = newProvider;
-                }
-                
-                // Update language options
-                const langSelect = box.querySelector('.language-select');
-                if (langSelect) {
-                    const currentLang = langSelect.value;
-                    langSelect.innerHTML = generateLanguageOptions(newProvider, currentLang);
-                }
-                
-                // Update model selector if needed
-                updateModelSelector(box, newProvider);
-                
-                // Retranslate
-                if (currentWord) {
-                    translateText(box, newProvider, langSelect ? langSelect.value : settings.defaultTargetLanguage);
-                }
-            }
-        } else {
-            console.log(`Provider ${provider} is still enabled, updating model selector only`);
-            // Provider is still enabled, but make sure model selector is updated
-            updateModelSelector(box, provider);
+        // Update API key reminder
+        const apiKeyReminder = box.querySelector('.api-key-reminder');
+        if (apiKeyReminder) {
+            const currentProvider = box.getAttribute('data-provider');
+            apiKeyReminder.textContent = settings.apiKeys[currentProvider] ? 
+                '✓ API key configured' : '⚠️ API key required in settings';
         }
     });
     
-    console.log('=== REFRESH TRANSLATION BOXES COMPLETE ===');
-    
     // Save the updated layout
     saveTranslationBoxesLayout();
+    
+    console.log('RefreshTranslationBoxes: Refresh complete');
 }
 
-// Helper function to update model selector for AI providers
+// Update model selector for AI providers
 function updateModelSelector(box, provider) {
-    const existingModelSelector = box.querySelector('.model-selector');
-    const boxId = box.id;
+    const modelSelector = box.querySelector('.model-selector');
+    const aiProviders = ['openai', 'claude', 'gemini'];
     
-    // Remove existing model selector
-    if (existingModelSelector) {
-        existingModelSelector.remove();
+    if (!aiProviders.includes(provider)) {
+        if (modelSelector) {
+            modelSelector.style.display = 'none';
+        }
+        return;
     }
     
-    // Add model selector for AI providers
-    if (provider === 'openai' || provider === 'claude' || provider === 'gemini') {
-        const langSelector = box.querySelector('.language-selector');
-        if (langSelector) {
-            let modelSelectorHTML = '';
+    const models = {
+        openai: ['gpt-4', 'gpt-3.5-turbo'],
+        claude: ['claude-3-sonnet-20240229', 'claude-3-haiku-20240307'],
+        gemini: ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash']
+    };
+    
+    const providerModels = models[provider] || [];
+    
+    if (modelSelector) {
+        modelSelector.style.display = 'block';
+        const modelSelect = modelSelector.querySelector('.model-select');
+        if (modelSelect) {
+            const currentValue = modelSelect.value;
+            modelSelect.innerHTML = providerModels.map(model => 
+                `<option value="${model}" ${model === currentValue ? 'selected' : ''}>${model}</option>`
+            ).join('');
             
-            if (provider === 'openai') {
-                modelSelectorHTML = `<div class="model-selector">
-                    <label for="model-select-${boxId}">Model:</label>
-                    <select class="model-select" id="model-select-${boxId}">
-                        <option value="gpt-4o">GPT-4o</option>
-                        <option value="gpt-4o-mini">GPT-4o mini</option>
-                        <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                        <option value="gpt-3.5-turbo" selected>GPT-3.5 Turbo</option>
-                    </select>
-                </div>`;
-            } else if (provider === 'claude') {
-                modelSelectorHTML = `<div class="model-selector">
-                    <label for="model-select-${boxId}">Model:</label>
-                    <select class="model-select" id="model-select-${boxId}">
-                        <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                        <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
-                        <option value="claude-3-haiku-20240307" selected>Claude 3 Haiku</option>
-                        <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
-                        <option value="claude-3-opus-20240229">Claude 3 Opus</option>
-                    </select>
-                </div>`;
-            } else if (provider === 'gemini') {
-                modelSelectorHTML = `<div class="model-selector">
-                    <label for="model-select-${boxId}">Model:</label>
-                    <select class="model-select" id="model-select-${boxId}">
-                        <option value="gemini-1.5-flash-latest" selected>Gemini 1.5 Flash</option>
-                        <option value="gemini-1.5-pro-latest">Gemini 1.5 Pro</option>
-                        <option value="gemini-1.0-pro">Gemini 1.0 Pro</option>
-                    </select>
-                </div>`;
-            }
-            
-            if (modelSelectorHTML) {
-                langSelector.insertAdjacentHTML('afterend', modelSelectorHTML);
+            // If current value is not available, select first option
+            if (!providerModels.includes(currentValue)) {
+                modelSelect.value = providerModels[0] || '';
             }
         }
     }
 }
 
-// Get the first enabled provider
+// Get first enabled provider
 function getFirstEnabledProvider() {
     for (const provider in settings.enabledProviders) {
         if (settings.enabledProviders[provider]) {
             return provider;
         }
     }
-    // If somehow none are enabled, fall back to Google
-    settings.enabledProviders.google = true;
-    return "google";
+    return 'google'; // fallback
 }
 
 // Translate text using specified provider
 function translateText(boxElement, provider, targetLang) {
     if (!currentWord) return;
     
-    const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
-    const translationText = boxElement.querySelector('.translation-text');
-    const errorElement = boxElement.querySelector('.translation-error');
+    console.log(`Translating "${currentWord}" using ${provider} to ${targetLang}`);
     
-    // Show loading indicator
-    loadingIndicator.classList.remove('hidden');
-    translationText.textContent = '';
-    errorElement.classList.add('hidden');
+    const contentElement = boxElement.querySelector('.translation-content');
+    if (contentElement) {
+        contentElement.innerHTML = '<div class="translation-loading-indicator">Translating...</div>';
+    }
     
-    // Get the translation based on provider
     switch (provider) {
         case 'google':
             translateWithGoogle(currentWord, currentSentence, targetLang, boxElement);
@@ -1583,280 +1863,158 @@ function translateText(boxElement, provider, targetLang) {
             translateWithGemini(currentWord, currentSentence, targetLang, boxElement);
             break;
         default:
-            // Fallback to Google
-            translateWithGoogle(currentWord, currentSentence, targetLang, boxElement);
+            showTranslationError(boxElement, `Unknown provider: ${provider}`);
     }
 }
 
-// Translation implementation for Google Translate
+// Google Translate implementation
 function translateWithGoogle(word, sentence, targetLang, boxElement) {
-    const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
-    const translationText = boxElement.querySelector('.translation-text');
-    const errorElement = boxElement.querySelector('.translation-error');
-    
-    // Show loading indicator
-    loadingIndicator.classList.remove('hidden');
-    errorElement.classList.add('hidden');
-    
-    // Use the free Google Translate API endpoint (no API key required)
-    const sourceLang = 'auto'; // Auto-detect source language
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodeURIComponent(word)}`;
+    // Google Translate doesn't require API key for basic usage
+    const text = encodeURIComponent(word);
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${text}`;
     
     fetch(url)
-        .then(response => {
-            if (!response.ok) {
-                throw new Error('Network response was not ok');
-            }
-            return response.json();
-        })
+        .then(response => response.json())
         .then(data => {
-            // Hide loading
-            loadingIndicator.classList.add('hidden');
-            
-            // Parse the translation result - the first result is the translation
             if (data && data[0] && data[0][0] && data[0][0][0]) {
                 const translation = data[0][0][0];
-                translationText.textContent = translation;
+                const contentElement = boxElement.querySelector('.translation-content');
+                if (contentElement) {
+                    contentElement.innerHTML = `<div class="translation-text">${translation}</div>`;
+                }
             } else {
-                throw new Error('Invalid translation response');
+                showTranslationError(boxElement, 'No translation found');
             }
         })
         .catch(error => {
-            console.error('Translation error:', error);
-            showTranslationError(boxElement, "Translation failed. The service might be temporarily unavailable.");
+            console.error('Google Translate error:', error);
+            showTranslationError(boxElement, 'Translation failed');
         });
 }
 
-// Translation implementation for DeepL
+// DeepL implementation
 function translateWithDeepL(word, sentence, targetLang, boxElement) {
     const apiKey = settings.apiKeys.deepl;
-    
-    console.log('DeepL Translation Debug:');
-    console.log('- API Key present:', !!apiKey);
-    console.log('- API Key length:', apiKey ? apiKey.length : 0);
-    console.log('- API Key starts with:', apiKey ? apiKey.substring(0, 8) + '...' : 'N/A');
-    console.log('- Word to translate:', word);
-    console.log('- Target language:', targetLang);
-    console.log('- Target language (uppercase):', targetLang.toUpperCase());
-    
     if (!apiKey) {
-        console.error('DeepL: No API key provided');
-        showTranslationError(boxElement, "API key required for DeepL. Please add your API key in settings.");
+        showTranslationError(boxElement, 'DeepL API key required');
         return;
     }
     
-    // Validate API key format (DeepL keys end with :fx for free tier)
-    if (!apiKey.includes(':')) {
-        console.warn('DeepL: API key might be invalid - DeepL keys typically contain a colon');
-    }
-    
-    const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
-    const translationText = boxElement.querySelector('.translation-text');
-    
-    // Show loading indicator
-    loadingIndicator.classList.remove('hidden');
-    
-    // Determine the correct API endpoint based on key type
+    // Determine the correct endpoint based on API key
     const isFreeKey = apiKey.endsWith(':fx');
-    const url = isFreeKey ? 'https://api-free.deepl.com/v2/translate' : 'https://api.deepl.com/v2/translate';
-    
-    // Prepare request body as JSON (new format)
-    const requestBody = {
-        text: [word],
-        target_lang: targetLang.toUpperCase()
-    };
-    
-    console.log('DeepL: Using API endpoint:', url);
-    console.log('DeepL: API key type:', isFreeKey ? 'Free' : 'Pro');
-    console.log('DeepL: Request body:', requestBody);
-    console.log('DeepL: Authorization header:', `DeepL-Auth-Key ${apiKey.substring(0, 8)}...`);
+    const baseUrl = isFreeKey ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
+    const url = `${baseUrl}/v2/translate`;
     
     fetch(url, {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `DeepL-Auth-Key ${apiKey}`
-        },
-        body: JSON.stringify(requestBody)
-    })
-    .then(response => {
-        console.log('DeepL: Response status:', response.status);
-        console.log('DeepL: Response headers:', Object.fromEntries(response.headers.entries()));
-        
-        if (!response.ok) {
-            return response.text().then(errorText => {
-                console.error('DeepL: Error response body:', errorText);
-                
-                // Parse common DeepL error messages
-                let userFriendlyMessage = 'Translation failed. ';
-                if (response.status === 403) {
-                    userFriendlyMessage += 'Invalid API key or authorization failed.';
-                } else if (response.status === 456) {
-                    userFriendlyMessage += 'Quota exceeded.';
-                } else if (response.status === 400) {
-                    userFriendlyMessage += 'Bad request - check target language.';
-                } else {
-                    userFriendlyMessage += `HTTP ${response.status}: ${errorText}`;
-                }
-                
-                throw new Error(userFriendlyMessage);
-            });
-        }
-        return response.json();
-    })
-    .then(data => {
-        console.log('DeepL: Success response:', data);
-        
-        // Hide loading
-        loadingIndicator.classList.add('hidden');
-        
-        // Check for valid response
-        if (data.translations && data.translations.length > 0) {
-            const translation = data.translations[0].text;
-            console.log('DeepL: Translation result:', translation);
-            translationText.textContent = translation;
-        } else {
-            console.error('DeepL: Invalid response structure:', data);
-            throw new Error('Invalid translation response');
-        }
-    })
-    .catch(error => {
-        console.error('DeepL: Translation error:', error);
-        console.error('DeepL: Error details:', {
-            message: error.message,
-            stack: error.stack
-        });
-        
-        // Hide loading
-        loadingIndicator.classList.add('hidden');
-        
-        // Show user-friendly error
-        showTranslationError(boxElement, error.message);
-    });
-}
-
-// Translation implementation for Microsoft Translator
-function translateWithMicrosoft(word, sentence, targetLang, boxElement) {
-    const apiKey = settings.apiKeys.microsoft;
-    
-    if (!apiKey) {
-        showTranslationError(boxElement, "API key required for Microsoft Translator. Please add your API key in settings.");
-        return;
-    }
-    
-    const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
-    const translationText = boxElement.querySelector('.translation-text');
-    
-    // Show loading indicator
-    loadingIndicator.classList.remove('hidden');
-    
-    // Call the Microsoft Translator API
-    const url = 'https://api.cognitive.microsofttranslator.com/translate';
-    const params = new URLSearchParams({
-        'api-version': '3.0',
-        'to': targetLang
-    });
-    
-    fetch(`${url}?${params}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Ocp-Apim-Subscription-Key': apiKey,
-            'Ocp-Apim-Subscription-Region': 'global' // Change this to your region
-        },
-        body: JSON.stringify([{ 'text': word }])
-    })
-    .then(response => {
-        if (!response.ok) {
-            throw new Error('Translation API error');
-        }
-        return response.json();
-    })
-    .then(data => {
-        // Hide loading
-        loadingIndicator.classList.add('hidden');
-        
-        // Check for valid response
-        if (data && data.length > 0 && data[0].translations && data[0].translations.length > 0) {
-            translationText.textContent = data[0].translations[0].text;
-        } else {
-            throw new Error('Invalid translation response');
-        }
-    })
-    .catch(error => {
-        console.error('Translation error:', error);
-        showTranslationError(boxElement, "Translation failed. Please check your API key and try again.");
-    });
-}
-
-// Translation implementation for Yandex Translate
-function translateWithYandex(word, sentence, targetLang, boxElement) {
-    const apiKey = settings.apiKeys.yandex;
-    
-    if (!apiKey) {
-        showTranslationError(boxElement, "API key required for Yandex Translate. Please add your API key in settings.");
-        return;
-    }
-    
-    const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
-    const translationText = boxElement.querySelector('.translation-text');
-    
-    // Show loading indicator
-    loadingIndicator.classList.remove('hidden');
-    
-    // Call the Yandex Translate API
-    const url = 'https://translate.api.cloud.yandex.net/translate/v2/translate';
-    
-    fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Api-Key ${apiKey}`
+            'Authorization': `DeepL-Auth-Key ${apiKey}`,
+            'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-            texts: [word],
-            targetLanguageCode: targetLang
+            text: [word],
+            target_lang: targetLang.toUpperCase()
         })
     })
-    .then(response => {
-        if (!response.ok) {
-            throw new Error('Translation API error');
-        }
-        return response.json();
-    })
-    .then(data => {
-        // Hide loading
-        loadingIndicator.classList.add('hidden');
-        
-        // Check for valid response
-        if (data.translations && data.translations.length > 0) {
-            translationText.textContent = data.translations[0].text;
-        } else {
-            throw new Error('Invalid translation response');
-        }
-    })
-    .catch(error => {
-        console.error('Translation error:', error);
-        showTranslationError(boxElement, "Translation failed. Please check your API key and try again.");
-    });
+        .then(response => response.json())
+        .then(data => {
+            if (data.translations && data.translations[0]) {
+                const translation = data.translations[0].text;
+                const contentElement = boxElement.querySelector('.translation-content');
+                if (contentElement) {
+                    contentElement.innerHTML = `<div class="translation-text">${translation}</div>`;
+                }
+            } else {
+                showTranslationError(boxElement, 'No translation found');
+            }
+        })
+        .catch(error => {
+            console.error('DeepL error:', error);
+            showTranslationError(boxElement, 'Translation failed');
+        });
 }
 
-// Translation implementation for OpenAI
+// Microsoft Translator implementation
+function translateWithMicrosoft(word, sentence, targetLang, boxElement) {
+    const apiKey = settings.apiKeys.microsoft;
+    if (!apiKey) {
+        showTranslationError(boxElement, 'Microsoft API key required');
+        return;
+    }
+    
+    const url = 'https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=' + targetLang;
+    
+    fetch(url, {
+        method: 'POST',
+        headers: {
+            'Ocp-Apim-Subscription-Key': apiKey,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify([{ text: word }])
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data && data[0] && data[0].translations && data[0].translations[0]) {
+                const translation = data[0].translations[0].text;
+                const contentElement = boxElement.querySelector('.translation-content');
+                if (contentElement) {
+                    contentElement.innerHTML = `<div class="translation-text">${translation}</div>`;
+                }
+            } else {
+                showTranslationError(boxElement, 'No translation found');
+            }
+        })
+        .catch(error => {
+            console.error('Microsoft Translator error:', error);
+            showTranslationError(boxElement, 'Translation failed');
+        });
+}
+
+// Yandex Translate implementation
+function translateWithYandex(word, sentence, targetLang, boxElement) {
+    const apiKey = settings.apiKeys.yandex;
+    if (!apiKey) {
+        showTranslationError(boxElement, 'Yandex API key required');
+        return;
+    }
+    
+    const url = 'https://translate.yandex.net/api/v1.5/tr.json/translate';
+    const params = new URLSearchParams({
+        key: apiKey,
+        text: word,
+        lang: targetLang
+    });
+    
+    fetch(`${url}?${params}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.code === 200 && data.text && data.text[0]) {
+                const translation = data.text[0];
+                const contentElement = boxElement.querySelector('.translation-content');
+                if (contentElement) {
+                    contentElement.innerHTML = `<div class="translation-text">${translation}</div>`;
+                }
+            } else {
+                showTranslationError(boxElement, 'No translation found');
+            }
+        })
+        .catch(error => {
+            console.error('Yandex Translate error:', error);
+            showTranslationError(boxElement, 'Translation failed');
+        });
+}
+
+// OpenAI implementation
 function translateWithOpenAI(word, sentence, targetLang, boxElement) {
     const apiKey = settings.apiKeys.openai;
-    
     if (!apiKey) {
-        showTranslationError(boxElement, "API key required for OpenAI. Please add your API key in settings.");
+        showTranslationError(boxElement, 'OpenAI API key required');
         return;
     }
     
-    const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
-    const translationText = boxElement.querySelector('.translation-text');
+    const modelSelect = boxElement.querySelector('.model-select');
+    const model = modelSelect ? modelSelect.value : 'gpt-3.5-turbo';
     
-    // Show loading indicator
-    loadingIndicator.classList.remove('hidden');
-    
-    // Define the language to use in the prompt
     const languageNames = {
         'ru': 'Russian',
         'en': 'English',
@@ -1869,101 +2027,60 @@ function translateWithOpenAI(word, sentence, targetLang, boxElement) {
     
     const targetLanguageName = languageNames[targetLang] || targetLang;
     
-    // Get model from the per-box selector
-    const modelSelect = boxElement.querySelector('.model-select');
-    const modelName = modelSelect ? modelSelect.value : 'gpt-3.5-turbo';
+    let prompt;
+    if (sentence && sentence.trim() && sentence !== word) {
+        prompt = `Translate the word "${word}" to ${targetLanguageName}. Context sentence: "${sentence}". Provide only the translation, no explanations.`;
+    } else {
+        prompt = `Translate "${word}" to ${targetLanguageName}. Provide only the translation, no explanations.`;
+    }
     
-    // Call the OpenAI API
-    const url = 'https://api.openai.com/v1/chat/completions';
-    const contextPrompt = sentence ? `In the context: "${sentence}"` : '';
-    
-    // Create the request payload
-    const systemMessage = `You are a professional translator. Translate the given word to ${targetLanguageName}. Be precise and concise.`;
-    const userMessage = `Translate the word "${word}" to ${targetLanguageName}. ${contextPrompt}`;
-    
-    const requestPayload = {
-        model: modelName,
-        messages: [
-            {
-                role: 'system',
-                content: systemMessage
-            },
-            {
-                role: 'user',
-                content: userMessage
-            }
-        ],
-        temperature: 0.3,
-        max_tokens: 50
-    };
-    
-    // Debug: Log the prompt being sent
-    console.log('🤖 OpenAI Translation Debug:');
-    console.log('- Model:', modelName);
-    console.log('- Word to translate:', word);
-    console.log('- Target language:', targetLanguageName);
-    console.log('- Context:', sentence || 'None');
-    console.log('- System message:', systemMessage);
-    console.log('- User message:', userMessage);
-    console.log('- Full request payload:', requestPayload);
-    
-    fetch(url, {
+    fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
         },
-        body: JSON.stringify(requestPayload)
+        body: JSON.stringify({
+            model: model,
+            messages: [
+                {
+                    role: 'user',
+                    content: prompt
+                }
+            ],
+            max_tokens: 100,
+            temperature: 0.3
+        })
     })
-    .then(response => {
-        if (!response.ok) {
-            throw new Error('Translation API error');
-        }
-        return response.json();
-    })
-    .then(data => {
-        // Debug: Log the full response received
-        console.log('🤖 OpenAI Response received:', data);
-        
-        // Hide loading
-        loadingIndicator.classList.add('hidden');
-        
-        // Check for valid response
-        if (data.choices && data.choices.length > 0 && data.choices[0].message) {
-            const translatedText = data.choices[0].message.content.trim();
-            
-            // Debug: Log the extracted translation
-            console.log('🤖 OpenAI Translation result:', translatedText);
-            console.log('🤖 OpenAI Token usage:', data.usage);
-            
-            translationText.textContent = translatedText;
-        } else {
-            console.error('🤖 OpenAI Invalid response structure:', data);
-            throw new Error('Invalid translation response');
-        }
-    })
-    .catch(error => {
-        console.error('🤖 OpenAI Translation error:', error);
-        showTranslationError(boxElement, "Translation failed. Please check your API key and try again.");
-    });
+        .then(response => response.json())
+        .then(data => {
+            if (data.choices && data.choices[0] && data.choices[0].message) {
+                const translation = data.choices[0].message.content.trim();
+                const contentElement = boxElement.querySelector('.translation-content');
+                if (contentElement) {
+                    contentElement.innerHTML = `<div class="translation-text">${translation}</div>`;
+                }
+            } else {
+                showTranslationError(boxElement, 'No translation found');
+            }
+        })
+        .catch(error => {
+            console.error('OpenAI error:', error);
+            showTranslationError(boxElement, 'Translation failed');
+        });
 }
 
-// Translation implementation for Claude
+// Claude implementation
 function translateWithClaude(word, sentence, targetLang, boxElement) {
     const apiKey = settings.apiKeys.claude;
-    
     if (!apiKey) {
-        showTranslationError(boxElement, "API key required for Claude. Please add your API key in settings.");
+        showTranslationError(boxElement, 'Claude API key required');
         return;
     }
     
-    const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
-    const translationText = boxElement.querySelector('.translation-text');
+    const modelSelect = boxElement.querySelector('.model-select');
+    const model = modelSelect ? modelSelect.value : 'claude-3-sonnet-20240229';
     
-    // Show loading indicator
-    loadingIndicator.classList.remove('hidden');
-    
-    // Define the language to use in the prompt
     const languageNames = {
         'ru': 'Russian',
         'en': 'English',
@@ -1976,93 +2093,60 @@ function translateWithClaude(word, sentence, targetLang, boxElement) {
     
     const targetLanguageName = languageNames[targetLang] || targetLang;
     
-    // Get model from the per-box selector
-    const modelSelect = boxElement.querySelector('.model-select');
-    const modelName = modelSelect ? modelSelect.value : 'claude-3-haiku-20240307';
+    let prompt;
+    if (sentence && sentence.trim() && sentence !== word) {
+        prompt = `Translate the word "${word}" to ${targetLanguageName}. Context sentence: "${sentence}". Provide only the translation, no explanations.`;
+    } else {
+        prompt = `Translate "${word}" to ${targetLanguageName}. Provide only the translation, no explanations.`;
+    }
     
-    // Call the Claude API
-    const url = 'https://api.anthropic.com/v1/messages';
-    const contextPrompt = sentence ? `Consider the context: "${sentence}"` : '';
-    const userMessage = `Translate the word "${word}" to ${targetLanguageName}. ${contextPrompt} Only provide the translation, without any explanations or additional text.`;
-    
-    const requestPayload = {
-        model: modelName,
-        max_tokens: 100,
-        messages: [
-            {
-                role: 'user',
-                content: userMessage
-            }
-        ]
-    };
-    
-    // Debug: Log the prompt being sent
-    console.log('🧠 Claude Translation Debug:');
-    console.log('- Model:', modelName);
-    console.log('- Word to translate:', word);
-    console.log('- Target language:', targetLanguageName);
-    console.log('- Context:', sentence || 'None');
-    console.log('- User message:', userMessage);
-    console.log('- Full request payload:', requestPayload);
-    
-    fetch(url, {
+    fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json',
             'x-api-key': apiKey,
+            'Content-Type': 'application/json',
             'anthropic-version': '2023-06-01'
         },
-        body: JSON.stringify(requestPayload)
+        body: JSON.stringify({
+            model: model,
+            max_tokens: 100,
+            messages: [
+                {
+                    role: 'user',
+                    content: prompt
+                }
+            ]
+        })
     })
-    .then(response => {
-        if (!response.ok) {
-            throw new Error('Translation API error');
-        }
-        return response.json();
-    })
-    .then(data => {
-        // Debug: Log the full response received
-        console.log('🧠 Claude Response received:', data);
-        
-        // Hide loading
-        loadingIndicator.classList.add('hidden');
-        
-        // Check for valid response
-        if (data.content && data.content.length > 0) {
-            const translatedText = data.content[0].text.trim();
-            
-            // Debug: Log the extracted translation
-            console.log('🧠 Claude Translation result:', translatedText);
-            console.log('🧠 Claude Usage info:', data.usage);
-            
-            translationText.textContent = translatedText;
-        } else {
-            console.error('🧠 Claude Invalid response structure:', data);
-            throw new Error('Invalid translation response');
-        }
-    })
-    .catch(error => {
-        console.error('🧠 Claude Translation error:', error);
-        showTranslationError(boxElement, "Translation failed. Please check your API key and try again.");
-    });
+        .then(response => response.json())
+        .then(data => {
+            if (data.content && data.content[0] && data.content[0].text) {
+                const translation = data.content[0].text.trim();
+                const contentElement = boxElement.querySelector('.translation-content');
+                if (contentElement) {
+                    contentElement.innerHTML = `<div class="translation-text">${translation}</div>`;
+                }
+            } else {
+                showTranslationError(boxElement, 'No translation found');
+            }
+        })
+        .catch(error => {
+            console.error('Claude error:', error);
+            showTranslationError(boxElement, 'Translation failed');
+        });
 }
 
-// Translation implementation for Gemini
+// Gemini implementation with rate limiting
 function translateWithGemini(word, sentence, targetLang, boxElement) {
     const apiKey = settings.apiKeys.gemini;
-    
     if (!apiKey) {
-        showTranslationError(boxElement, "API key required for Gemini. Please add your API key in settings.");
+        showTranslationError(boxElement, 'Gemini API key required');
         return;
     }
     
-    const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
-    const translationText = boxElement.querySelector('.translation-text');
+    const modelSelect = boxElement.querySelector('.model-select');
+    const model = modelSelect ? modelSelect.value : 'gemini-1.5-flash';
     
-    // Show loading indicator
-    loadingIndicator.classList.remove('hidden');
-    
-    // Define the language to use in the prompt
     const languageNames = {
         'ru': 'Russian',
         'en': 'English',
@@ -2075,112 +2159,64 @@ function translateWithGemini(word, sentence, targetLang, boxElement) {
     
     const targetLanguageName = languageNames[targetLang] || targetLang;
     
-    // Get model from the per-box selector
-    const modelSelect = boxElement.querySelector('.model-select');
-    const modelName = modelSelect ? modelSelect.value : 'gemini-1.5-flash-latest';
+    let prompt;
+    if (sentence && sentence.trim() && sentence !== word) {
+        prompt = `Translate the word "${word}" to ${targetLanguageName}. Context sentence: "${sentence}". Provide only the translation, no explanations.`;
+    } else {
+        prompt = `Translate "${word}" to ${targetLanguageName}. Provide only the translation, no explanations.`;
+    }
     
-    // Call the Gemini API
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-    const contextPrompt = sentence ? `Consider the context: "${sentence}"` : '';
-    const promptText = `Translate the word "${word}" to ${targetLanguageName}. ${contextPrompt} Only provide the translation, without any explanations or additional text.`;
-    
-    const requestPayload = {
-        contents: [
-            {
-                parts: [
-                    {
-                        text: promptText
-                    }
-                ]
-            }
-        ]
-    };
-    
-    // Debug: Log the prompt being sent
-    console.log('💎 Gemini Translation Debug:');
-    console.log('- Model:', modelName);
-    console.log('- Word to translate:', word);
-    console.log('- Target language:', targetLanguageName);
-    console.log('- Context:', sentence || 'None');
-    console.log('- Prompt text:', promptText);
-    console.log('- Full request payload:', requestPayload);
-    console.log('- API URL:', url.replace(apiKey, '[API_KEY_HIDDEN]'));
-    
-    // Use the queue system to prevent rate limiting
+    // Queue the request to handle rate limiting
     const geminiRequest = () => {
-        console.log('🚀 Executing queued Gemini request');
-        
-        return fetch(url, {
+        return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(requestPayload)
+            body: JSON.stringify({
+                contents: [
+                    {
+                        parts: [
+                            {
+                                text: prompt
+                            }
+                        ]
+                    }
+                ]
+            })
         })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error('Translation API error');
-            }
-            return response.json();
-        })
-        .then(data => {
-            // Debug: Log the full response received
-            console.log('💎 Gemini Response received:', data);
-            
-            // Hide loading
-            loadingIndicator.classList.add('hidden');
-            
-            // Check for valid response
-            if (data.candidates && data.candidates.length > 0 && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts.length > 0) {
-                const translatedText = data.candidates[0].content.parts[0].text.trim();
-                
-                // Debug: Log the extracted translation
-                console.log('💎 Gemini Translation result:', translatedText);
-                console.log('💎 Gemini Usage metadata:', data.usageMetadata);
-                console.log('💎 Gemini Safety ratings:', data.candidates[0].safetyRatings);
-                
-                translationText.textContent = translatedText;
-            } else {
-                console.error('💎 Gemini Invalid response structure:', data);
-                throw new Error('Invalid translation response');
-            }
-        })
-        .catch(error => {
-            console.error('💎 Gemini Translation error:', error);
-            showTranslationError(boxElement, "Translation failed. Please check your API key and try again.");
-        });
+            .then(response => response.json())
+            .then(data => {
+                if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0]) {
+                    const translation = data.candidates[0].content.parts[0].text.trim();
+                    const contentElement = boxElement.querySelector('.translation-content');
+                    if (contentElement) {
+                        contentElement.innerHTML = `<div class="translation-text">${translation}</div>`;
+                    }
+                } else {
+                    showTranslationError(boxElement, 'No translation found');
+                }
+            })
+            .catch(error => {
+                console.error('Gemini error:', error);
+                showTranslationError(boxElement, 'Translation failed');
+            });
     };
     
-    // Add the request to the queue instead of executing immediately
-    console.log('📋 Adding Gemini request to queue to prevent rate limiting');
     queueGeminiRequest(geminiRequest);
 }
 
 // Show translation error
 function showTranslationError(boxElement, errorMessage) {
-    const loadingIndicator = boxElement.querySelector('.translation-loading-indicator');
-    const translationText = boxElement.querySelector('.translation-text');
-    const errorElement = boxElement.querySelector('.translation-error');
-    
-    // Hide loading
-    loadingIndicator.classList.add('hidden');
-    translationText.textContent = '';
-    
-    // Show error
-    errorElement.textContent = errorMessage || "Translation error. Please try again.";
-    errorElement.classList.remove('hidden');
+    const contentElement = boxElement.querySelector('.translation-content');
+    if (contentElement) {
+        contentElement.innerHTML = `<div class="translation-error">${errorMessage}</div>`;
+    }
 }
 
-// Initialize when DOM is fully loaded
-document.addEventListener("DOMContentLoaded", () => {
-    console.log('DOMContentLoaded event fired');
-    initializeSidebar();
-});
-
-// Fallback initialization in case DOMContentLoaded already fired
+// Initialize when DOM is loaded
 if (document.readyState === 'loading') {
-    console.log('Document still loading, waiting for DOMContentLoaded');
+    document.addEventListener('DOMContentLoaded', initializeSidebar);
 } else {
-    console.log('Document already loaded, initializing immediately');
     initializeSidebar();
 }

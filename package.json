@@ -1,5 +1,16 @@
 {
+  "name": "chrome-translator-extension",
+  "version": "1.0.0",
+  "description": "A Chrome extension for translating text with multiple providers and Supabase sync",
+  "scripts": {
+    "install-deps": "npm install"
+  },
   "dependencies": {
+    "@supabase/supabase-js": "^2.38.0",
     "npx": "^10.2.2"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=14.0.0"
   }
 }

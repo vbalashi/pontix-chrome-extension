@@ -42,7 +42,7 @@
     ],
     "web_accessible_resources": [
       {
-        "resources": ["sidebar.html", "sidebar.css", "sidebar.js"],
+        "resources": ["sidebar.html", "sidebar.css", "sidebar.js", "supabase-client.js", "supabase.js"],
         "matches": ["<all_urls>"]
       }
     ],
