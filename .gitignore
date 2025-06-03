@@ -16,3 +16,6 @@ graphics/
 test*
 TESTING_GUIDE.md
 *backup*
+*.gz
+.cursor/
+TESTING_GUIDE.md
