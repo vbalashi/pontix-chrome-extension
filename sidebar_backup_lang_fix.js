@@ -99,11 +99,8 @@ let settings = {
     defaultTargetLanguage: "ru",
     translationBoxes: [
         { provider: "google", targetLanguage: "ru" }
-    ]
-};
-
-// Separate dynamic data cache (not stored in profiles)
-let dynamicData = {
+    ],
+    // Dynamic language and model data
     supportedLanguages: {
         google: ["ru", "en", "de", "fr", "es", "zh", "ja"],
         deepl: ["ru", "en", "de", "fr", "es", "zh", "ja"],
@@ -147,22 +144,9 @@ const providerNames = {
 
 // Language code to name mapping
 const languageNames = {
-    'af': 'Afrikaans',
-    'sq': 'Albanian', 
-    'am': 'Amharic',
     'ar': 'Arabic',
-    'hy': 'Armenian',
-    'az': 'Azerbaijani',
-    'eu': 'Basque',
-    'be': 'Belarusian',
     'bg': 'Bulgarian',
     'bn': 'Bengali',
-    'bs': 'Bosnian',
-    'ca': 'Catalan',
-    'ceb': 'Cebuano',
-    'ny': 'Chichewa',
-    'co': 'Corsican',
-    'hr': 'Croatian',
     'cs': 'Czech',
     'da': 'Danish',
     'de': 'German',
@@ -685,28 +669,16 @@ async function syncFromSupabase() {
                 apiKeys: {
                     ...settings.apiKeys,
                     ...settingsResult.data.api_keys
+                },
+                supportedLanguages: {
+                    ...settings.supportedLanguages,
+                    ...(settingsResult.data.supported_languages || {})
+                },
+                availableModels: {
+                    ...settings.availableModels,
+                    ...(settingsResult.data.available_models || {})
                 }
             };
-            
-            // Handle dynamic data separately if it exists in Supabase
-            if (settingsResult.data.supported_languages || settingsResult.data.available_models) {
-                dynamicData = {
-                    ...dynamicData,
-                    supportedLanguages: {
-                        ...dynamicData.supportedLanguages,
-                        ...(settingsResult.data.supported_languages || {})
-                    },
-                    availableModels: {
-                        ...dynamicData.availableModels,
-                        ...(settingsResult.data.available_models || {})
-                    },
-                    lastLanguageUpdate: settingsResult.data.last_language_update || dynamicData.lastLanguageUpdate,
-                    lastModelUpdate: settingsResult.data.last_model_update || dynamicData.lastModelUpdate
-                };
-                
-                // Save dynamic data locally
-                saveSettings();
-            }
             
             console.log('🔄 Loaded settings from Supabase');
         }
@@ -1001,7 +973,7 @@ function saveToProfile(profileName) {
 }
 
 // Delete a profile
-async function deleteProfile(profileName) {
+function deleteProfile(profileName) {
     if (!profiles[profileName]) {
         console.error('DeleteProfile: Profile not found:', profileName);
         return false;
@@ -1013,26 +985,6 @@ async function deleteProfile(profileName) {
         return false;
     }
     
-    // Delete from Supabase first if authenticated
-    if (isAuthenticated && syncEnabled) {
-        console.log('DeleteProfile: Deleting from Supabase:', profileName);
-        try {
-            const result = await window.SupabaseAuth.deleteUserProfile(profileName);
-            if (result.error) {
-                console.error('DeleteProfile: Failed to delete from Supabase:', result.error);
-                // Don't return false here, still allow local deletion
-                // Just log the error and show a message to the user
-                showSyncMessage(`Failed to delete profile from cloud: ${result.error}`, 'error');
-            } else {
-                console.log('DeleteProfile: Successfully deleted from Supabase');
-            }
-        } catch (error) {
-            console.error('DeleteProfile: Exception deleting from Supabase:', error);
-            showSyncMessage('Failed to delete profile from cloud', 'error');
-        }
-    }
-    
-    // Delete locally
     delete profiles[profileName];
     
     // If we deleted the current profile, switch to first available
@@ -1046,11 +998,6 @@ async function deleteProfile(profileName) {
     saveProfiles();
     updateProfileDropdown();
     updateProfilesList();
-    
-    // Show success message if we're authenticated
-    if (isAuthenticated && syncEnabled) {
-        showSyncMessage('Profile deleted from cloud successfully', 'success');
-    }
     
     return true;
 }
@@ -1103,13 +1050,17 @@ function getCurrentSettings() {
         apiKeys[provider] = input ? input.value : settings.apiKeys[provider];
     }
     
-    // Only include user-specific settings, not dynamic data
     return {
         maxWordCount: maxWordCount,
         enabledProviders: enabledProviders,
         apiKeys: apiKeys,
         defaultTargetLanguage: settings.defaultTargetLanguage,
-        translationBoxes: translationBoxes
+        translationBoxes: translationBoxes,
+        // Include dynamic data
+        supportedLanguages: settings.supportedLanguages,
+        availableModels: settings.availableModels,
+        lastLanguageUpdate: settings.lastLanguageUpdate,
+        lastModelUpdate: settings.lastModelUpdate
     };
 }
 
@@ -1458,8 +1409,7 @@ function loadSettings() {
     }
     
     try {
-        // Load both user settings and dynamic data separately
-        chrome.storage.sync.get(["translatorSettings", "translatorDynamicData"], (result) => {
+        chrome.storage.sync.get("translatorSettings", (result) => {
             console.log('LoadSettings: Storage query result:', result);
             
             if (chrome.runtime.lastError) {
@@ -1470,7 +1420,6 @@ function loadSettings() {
                 return;
             }
             
-            // Load user settings
             if (result.translatorSettings) {
                 console.log('LoadSettings: Found saved settings, merging with defaults...');
                 // Merge saved settings with defaults to ensure all properties exist
@@ -1485,31 +1434,19 @@ function loadSettings() {
                     apiKeys: {
                         ...settings.apiKeys,
                         ...(result.translatorSettings.apiKeys || {})
+                    },
+                    supportedLanguages: {
+                        ...settings.supportedLanguages,
+                        ...(result.translatorSettings.supportedLanguages || {})
+                    },
+                    availableModels: {
+                        ...settings.availableModels,
+                        ...(result.translatorSettings.availableModels || {})
                     }
                 };
                 console.log('LoadSettings: Final merged settings:', settings);
             } else {
                 console.log('LoadSettings: No saved settings found, using defaults');
-            }
-            
-            // Load dynamic data separately
-            if (result.translatorDynamicData) {
-                console.log('LoadSettings: Found saved dynamic data, merging...');
-                dynamicData = {
-                    ...dynamicData,
-                    ...result.translatorDynamicData,
-                    supportedLanguages: {
-                        ...dynamicData.supportedLanguages,
-                        ...(result.translatorDynamicData.supportedLanguages || {})
-                    },
-                    availableModels: {
-                        ...dynamicData.availableModels,
-                        ...(result.translatorDynamicData.availableModels || {})
-                    }
-                };
-                console.log('LoadSettings: Final merged dynamic data:', dynamicData);
-            } else {
-                console.log('LoadSettings: No saved dynamic data found, using defaults');
             }
             
             // Update UI (restoreTranslationBoxes will be called by loadProfiles)
@@ -1535,15 +1472,11 @@ function saveSettings() {
     }
     
     try {
-        // Save user settings and dynamic data separately to avoid quota issues
-        chrome.storage.sync.set({ 
-            "translatorSettings": settings,
-            "translatorDynamicData": dynamicData
-        }, () => {
+        chrome.storage.sync.set({ "translatorSettings": settings }, () => {
             if (chrome.runtime.lastError) {
                 console.error('SaveSettings: Error saving settings:', chrome.runtime.lastError);
             } else {
-                console.log('SaveSettings: Settings and dynamic data saved successfully');
+                console.log('SaveSettings: Settings saved successfully');
             }
         });
     } catch (error) {
@@ -1831,30 +1764,14 @@ function setupEventListeners() {
     
     // Profile list events (delegated)
     if (profilesList) {
-        profilesList.addEventListener('click', async (e) => {
+        profilesList.addEventListener('click', (e) => {
             if (e.target.classList.contains('edit-profile')) {
                 const profileName = e.target.getAttribute('data-profile');
                 showProfileModal('edit', profileName);
             } else if (e.target.classList.contains('delete-profile')) {
                 const profileName = e.target.getAttribute('data-profile');
                 if (confirm(`Are you sure you want to delete the profile "${profileName}"?`)) {
-                    // Disable the delete button during deletion to prevent double-clicks
-                    const deleteButton = e.target;
-                    deleteButton.disabled = true;
-                    deleteButton.textContent = 'Deleting...';
-                    
-                    try {
-                        await deleteProfile(profileName);
-                    } catch (error) {
-                        console.error('Error deleting profile:', error);
-                        showSyncMessage('Failed to delete profile', 'error');
-                    } finally {
-                        // Re-enable the button (though it might be removed if deletion was successful)
-                        if (deleteButton && deleteButton.parentNode) {
-                            deleteButton.disabled = false;
-                            deleteButton.textContent = 'Delete';
-                        }
-                    }
+                    deleteProfile(profileName);
                 }
             }
         });
@@ -2132,7 +2049,7 @@ function addTranslationBox(provider, targetLang, model = null) {
         const aiProviders = ['openai', 'claude', 'gemini'];
         if (!aiProviders.includes(provider)) return '';
         
-        const providerModels = dynamicData.availableModels[provider] || [];
+        const providerModels = settings.availableModels[provider] || [];
         const selectedModel = model || providerModels[0] || '';
         
         return `
@@ -2213,7 +2130,7 @@ function generateProviderOptions(selectedProvider) {
 
 // Generate language options HTML
 function generateLanguageOptions(provider, selectedLang) {
-    const languages = dynamicData.supportedLanguages[provider] || dynamicData.supportedLanguages.google;
+    const languages = settings.supportedLanguages[provider] || settings.supportedLanguages.google;
     let options = '';
     languages.forEach(lang => {
         const selected = lang === selectedLang ? 'selected' : '';
@@ -2230,8 +2147,8 @@ function getLanguageName(langCode) {
 // Refresh all translation boxes (when settings change)
 function refreshTranslationBoxes() {
     console.log('RefreshTranslationBoxes: Refreshing all translation boxes...');
-    console.log('RefreshTranslationBoxes: Using dynamic language data:', Object.keys(dynamicData.supportedLanguages));
-    console.log('RefreshTranslationBoxes: Using dynamic model data:', Object.keys(dynamicData.availableModels));
+    console.log('RefreshTranslationBoxes: Using dynamic language data:', Object.keys(settings.supportedLanguages));
+    console.log('RefreshTranslationBoxes: Using dynamic model data:', Object.keys(settings.availableModels));
     
     const boxes = document.querySelectorAll('.translation-box');
     boxes.forEach((box, index) => {
@@ -2308,7 +2225,7 @@ function updateModelSelector(box, provider) {
         return;
     }
     
-    const providerModels = dynamicData.availableModels[provider] || [];
+    const providerModels = settings.availableModels[provider] || [];
     
     if (modelSelector) {
         modelSelector.style.display = 'block';
@@ -2988,7 +2905,7 @@ async function updateLanguagesAndModels() {
         ]);
         
         // Update language settings
-        dynamicData.supportedLanguages = {
+        settings.supportedLanguages = {
             google: googleLangs,
             deepl: deeplLangs,
             microsoft: microsoftLangs,
@@ -3007,22 +2924,26 @@ async function updateLanguagesAndModels() {
         ]);
         
         // Update model settings
-        dynamicData.availableModels = {
+        settings.availableModels = {
             openai: openaiModels,
             claude: claudeModels,
             gemini: geminiModels
         };
         
         // Update timestamps
-        dynamicData.lastLanguageUpdate = new Date().toISOString();
-        dynamicData.lastModelUpdate = new Date().toISOString();
+        settings.lastLanguageUpdate = new Date().toISOString();
+        settings.lastModelUpdate = new Date().toISOString();
         
-        // Save settings (this will save both user settings and dynamic data separately)
+        // Save settings
         saveSettings();
         
-        // Update current profile if we have one (but don't include dynamic data)
+        // Update current profile if we have one
         if (currentProfileName && profiles[currentProfileName]) {
             const currentSettings = getCurrentSettings();
+            currentSettings.supportedLanguages = settings.supportedLanguages;
+            currentSettings.availableModels = settings.availableModels;
+            currentSettings.lastLanguageUpdate = settings.lastLanguageUpdate;
+            currentSettings.lastModelUpdate = settings.lastModelUpdate;
             profiles[currentProfileName] = currentSettings;
             saveProfiles();
         }

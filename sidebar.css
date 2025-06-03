@@ -696,25 +696,52 @@ body {
 }
 
 .settings-actions {
-    text-align: center;
-    margin-top: 30px;
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
 }
 
 #save-settings {
-    background-color: #137333;
+    background-color: #1a73e8;
     color: white;
     border: none;
     padding: 12px 24px;
-    border-radius: 6px;
-    cursor: pointer;
+    border-radius: 8px;
     font-size: 14px;
     font-weight: 500;
-    transition: background-color 0.2s;
-    min-width: 120px;
+    cursor: pointer;
+    transition: background-color 0.2s, box-shadow 0.2s;
 }
 
 #save-settings:hover {
-    background-color: #0f5132;
+    background-color: #1557b0;
+}
+
+#update-languages-models {
+    background-color: #f8f9fa;
+    color: #5f6368;
+    border: 1px solid #dadce0;
+    padding: 11px 23px; /* Slightly less padding due to border */
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+#update-languages-models:hover {
+    background-color: #f1f3f4;
+    border-color: #c4c7ca;
+}
+
+#update-languages-models:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+#update-languages-models:disabled:hover {
+    background-color: #f8f9fa;
+    border-color: #dadce0;
 }
 
 .profile-management-section {
