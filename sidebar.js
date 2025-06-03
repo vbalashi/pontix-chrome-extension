@@ -78,6 +78,7 @@ let otpType = ''; // 'signup' or 'signin'
 // Default settings
 let settings = {
     maxWordCount: 25, // Default maximum word count for translation
+    debugSelection: false, // Show/hide selected text and sentence for debugging
     enabledProviders: {
         google: true,
         deepl: false,
@@ -677,6 +678,7 @@ async function syncFromSupabase() {
             settings = {
                 ...settings,
                 maxWordCount: settingsResult.data.max_word_count || settings.maxWordCount,
+                debugSelection: settingsResult.data.debug_selection !== undefined ? settingsResult.data.debug_selection : settings.debugSelection,
                 defaultTargetLanguage: settingsResult.data.default_target_language || settings.defaultTargetLanguage,
                 enabledProviders: {
                     ...settings.enabledProviders,
@@ -1089,6 +1091,10 @@ function getCurrentSettings() {
     const maxWordCountInput = document.getElementById('max-word-count');
     const maxWordCount = maxWordCountInput ? parseInt(maxWordCountInput.value) || 25 : settings.maxWordCount;
     
+    // Get debug selection setting
+    const debugSelectionCheckbox = document.getElementById('debug-selection');
+    const debugSelection = debugSelectionCheckbox ? debugSelectionCheckbox.checked : settings.debugSelection;
+    
     // Get enabled providers from checkboxes
     const enabledProviders = {};
     for (const provider in settings.enabledProviders) {
@@ -1106,6 +1112,7 @@ function getCurrentSettings() {
     // Only include user-specific settings, not dynamic data
     return {
         maxWordCount: maxWordCount,
+        debugSelection: debugSelection,
         enabledProviders: enabledProviders,
         apiKeys: apiKeys,
         defaultTargetLanguage: settings.defaultTargetLanguage,
@@ -1672,6 +1679,12 @@ function updateSettingsUI() {
         maxWordCountInput.value = settings.maxWordCount;
     }
     
+    // Update debug selection checkbox
+    const debugSelectionCheckbox = document.getElementById('debug-selection');
+    if (debugSelectionCheckbox) {
+        debugSelectionCheckbox.checked = settings.debugSelection;
+    }
+    
     // Update provider checkboxes and API keys
     for (const provider in settings.enabledProviders) {
         const checkbox = document.getElementById(`enable-${provider}`);
@@ -1685,7 +1698,22 @@ function updateSettingsUI() {
         }
     }
     
+    // Update debug selection visibility
+    updateDebugSelectionVisibility();
+    
     console.log('UpdateSettingsUI: UI update complete');
+}
+
+// Update debug selection visibility
+function updateDebugSelectionVisibility() {
+    const selectedWordContainer = document.querySelector('.selected-word-container');
+    if (selectedWordContainer) {
+        if (settings.debugSelection) {
+            selectedWordContainer.style.display = 'block';
+        } else {
+            selectedWordContainer.style.display = 'none';
+        }
+    }
 }
 
 // Setup event listeners
@@ -1719,6 +1747,12 @@ function setupEventListeners() {
                 settings.maxWordCount = parseInt(maxWordCountInput.value) || 25;
             }
             
+            // Get debug selection setting
+            const debugSelectionCheckbox = document.getElementById('debug-selection');
+            if (debugSelectionCheckbox) {
+                settings.debugSelection = debugSelectionCheckbox.checked;
+            }
+            
             // Update provider settings
             for (const provider in settings.enabledProviders) {
                 const checkbox = document.getElementById(`enable-${provider}`);
@@ -1734,6 +1768,9 @@ function setupEventListeners() {
             
             console.log('Settings updated:', settings);
             saveSettings();
+            
+            // Update debug selection visibility
+            updateDebugSelectionVisibility();
             
             // Refresh translation boxes to reflect new settings
             refreshTranslationBoxes();
@@ -2080,7 +2117,7 @@ function handleTranslationsContainerChange(event) {
             providerNameElement.textContent = providerNames[newProvider] || newProvider;
         }
         
-        // Update model selector for AI providers
+        // Update model selector for AI providers (this handles model display too)
         updateModelSelector(box, newProvider);
         
         // Retranslate with new provider
@@ -2090,7 +2127,6 @@ function handleTranslationsContainerChange(event) {
         
         // Save layout
         saveTranslationBoxesLayout();
-        
     } else if (target.classList.contains('language-select')) {
         const box = target.closest('.translation-box');
         const provider = box.getAttribute('data-provider');
@@ -2113,6 +2149,13 @@ function handleTranslationsContainerChange(event) {
         const provider = box.getAttribute('data-provider');
         const langSelect = box.querySelector('.language-select');
         const targetLang = langSelect ? langSelect.value : settings.defaultTargetLanguage;
+        const newModel = target.value;
+        
+        // Update model name in header
+        const modelNameElement = box.querySelector('.model-name');
+        if (modelNameElement) {
+            modelNameElement.textContent = newModel;
+        }
         
         // Retranslate with new model
         translateText(box, provider, targetLang);
@@ -2145,6 +2188,16 @@ function addTranslationBox(provider, targetLang, model = null) {
         `;
     };
     
+    const getModelDisplayHTML = (provider) => {
+        const aiProviders = ['openai', 'claude', 'gemini'];
+        if (!aiProviders.includes(provider)) return '';
+        
+        const providerModels = dynamicData.availableModels[provider] || [];
+        const selectedModel = model || providerModels[0] || '';
+        
+        return `<span class="model-name">${selectedModel}</span>`;
+    };
+    
     const box = document.createElement('div');
     box.className = 'translation-box';
     box.setAttribute('data-provider', provider);
@@ -2154,6 +2207,7 @@ function addTranslationBox(provider, targetLang, model = null) {
             <div class="provider-info">
                 <span class="provider-name">${providerNames[provider] || provider}</span>
                 <span class="target-language">${getLanguageName(targetLang)}</span>
+                ${getModelDisplayHTML(provider)}
             </div>
             <div class="translation-controls">
                 <button class="settings-button" title="Settings">
@@ -2305,12 +2359,18 @@ function updateModelSelector(box, provider) {
         if (modelSelector) {
             modelSelector.style.display = 'none';
         }
+        // Hide model name in header for non-AI providers
+        const modelNameElement = box.querySelector('.model-name');
+        if (modelNameElement) {
+            modelNameElement.remove();
+        }
         return;
     }
     
     const providerModels = dynamicData.availableModels[provider] || [];
     
     if (modelSelector) {
+        // Model selector already exists, just update it
         modelSelector.style.display = 'block';
         const modelSelect = modelSelector.querySelector('.model-select');
         if (modelSelect) {
@@ -2323,12 +2383,64 @@ function updateModelSelector(box, provider) {
             if (!providerModels.includes(currentValue)) {
                 modelSelect.value = providerModels[0] || '';
             }
+            
+            // Update model name in header
+            const modelNameElement = box.querySelector('.model-name');
+            if (modelNameElement) {
+                modelNameElement.textContent = modelSelect.value;
+            } else {
+                // Create model name element if it doesn't exist
+                const targetLanguageElement = box.querySelector('.target-language');
+                if (targetLanguageElement) {
+                    const modelSpan = document.createElement('span');
+                    modelSpan.className = 'model-name';
+                    modelSpan.textContent = modelSelect.value;
+                    targetLanguageElement.parentNode.appendChild(modelSpan);
+                }
+            }
+        }
+    } else {
+        // Model selector doesn't exist, create it
+        const providerSettings = box.querySelector('.provider-settings');
+        if (providerSettings) {
+            // Find the language selector to insert the model selector after it
+            const languageSelector = providerSettings.querySelector('.language-selector');
+            if (languageSelector) {
+                // Create the model selector HTML
+                const selectedModel = providerModels[0] || '';
+                const modelSelectorHTML = `
+                    <div class="model-selector">
+                        <label for="model-select-${Date.now()}">Model:</label>
+                        <select class="model-select" id="model-select-${Date.now()}">
+                            ${providerModels.map(m => `<option value="${m}" ${m === selectedModel ? 'selected' : ''}>${m}</option>`).join('')}
+                        </select>
+                    </div>
+                `;
+                
+                // Insert the model selector after the language selector
+                languageSelector.insertAdjacentHTML('afterend', modelSelectorHTML);
+                
+                // Create model name element in header
+                const targetLanguageElement = box.querySelector('.target-language');
+                if (targetLanguageElement) {
+                    const modelSpan = document.createElement('span');
+                    modelSpan.className = 'model-name';
+                    modelSpan.textContent = selectedModel;
+                    targetLanguageElement.parentNode.appendChild(modelSpan);
+                }
+            }
         }
     }
 }
 
-// Get first enabled provider
+// Get first enabled provider (prefer Google as default)
 function getFirstEnabledProvider() {
+    // Prefer Google first if it's enabled
+    if (settings.enabledProviders.google) {
+        return 'google';
+    }
+    
+    // Then check other providers
     for (const provider in settings.enabledProviders) {
         if (settings.enabledProviders[provider]) {
             return provider;
