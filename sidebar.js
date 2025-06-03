@@ -1854,6 +1854,18 @@ function setupEventListeners() {
         updateLanguagesModelsButton.addEventListener('click', updateLanguagesAndModels);
     }
     
+    // Debug selection checkbox - immediate visibility update
+    const debugSelectionCheckbox = document.getElementById('debug-selection');
+    if (debugSelectionCheckbox) {
+        debugSelectionCheckbox.addEventListener('change', (e) => {
+            console.log('Debug selection checkbox changed:', e.target.checked);
+            settings.debugSelection = e.target.checked;
+            updateDebugSelectionVisibility();
+            // Also save the setting immediately
+            saveSettings();
+        });
+    }
+    
     // Add translation button
     if (addTranslationButton) {
         addTranslationButton.addEventListener('click', () => {
