@@ -1,4 +1,4 @@
-# Chrome Translator Extension - Publishing Guide
+# Chrome Pontix - Publishing Guide
 
 ## 📦 Package Information
 
@@ -71,7 +71,7 @@ build/
 1. **Create ZIP Package**:
    ```bash
    cd build/
-   zip -r ../chrome-translator-extension.zip .
+   zip -r ../pontix-extension.zip .
    ```
 
 2. **Go to Chrome Web Store Developer Dashboard**:

@@ -16,7 +16,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Toggle Pontix Sidebar",
+    "default_title": "Pontix",
     "default_icon": {
       "16": "icons/pontix_icon_16.png",
       "48": "icons/pontix_icon_48.png",
