@@ -8,9 +8,6 @@
     "storage",
     "scripting"
   ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -31,9 +28,8 @@
   "content_scripts": [
     {
       "matches": [
-        "<all_urls>",
-        "*://read.microsoft.com/*",
-        "*://*.immersive-reader.microsoft.com/*"
+        "http://*/*",
+        "https://*/*"
       ],
       "js": [
         "content.js"
@@ -52,13 +48,9 @@
         "supabase.js"
       ],
       "matches": [
-        "<all_urls>"
+        "http://*/*",
+        "https://*/*"
       ]
     }
-  ],
-  "externally_connectable": {
-    "matches": [
-      "<all_urls>"
-    ]
-  }
+  ]
 }
