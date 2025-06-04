@@ -661,7 +661,8 @@ async function handleOtpVerification() {
         showAuthMessage(otpVerifyMessage, 'Verifying code...', 'info');
         otpVerifySubmit.disabled = true;
         
-        const { data, error } = await window.SupabaseAuth.verifyOtp(otpEmail, code, 'email');
+        const otpChannel = otpType === 'signup' ? 'signup' : 'email';
+        const { data, error } = await window.SupabaseAuth.verifyOtp(otpEmail, code, otpChannel);
         
         if (error) {
             showAuthMessage(otpVerifyMessage, error, 'error');
