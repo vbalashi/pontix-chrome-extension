@@ -8,7 +8,7 @@ try {
     const sourcePath = path.join(__dirname, 'node_modules', '@supabase', 'supabase-js', 'dist', 'umd', 'supabase.js');
     
     // Destination path in the extension
-    const destPath = path.join(__dirname, 'supabase.js');
+    const destPath = path.join(__dirname, 'src', 'supabase.js');
     
     // Check if source file exists
     if (!fs.existsSync(sourcePath)) {
@@ -31,7 +31,7 @@ try {
     }
     
     // Update manifest to include the bundled library
-    const manifestPath = path.join(__dirname, 'manifest.json');
+    const manifestPath = path.join(__dirname, 'src', 'manifest.json');
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     
     // Add supabase.js to web accessible resources if not already there

@@ -9,24 +9,24 @@ mkdir -p build/
 
 # Copy essential files only
 echo "📁 Copying essential files..."
-cp manifest.json build/
-cp background.js build/
-cp content.js build/
-cp sidebar.html build/
-cp sidebar.css build/
-cp sidebar.js build/
-cp supabase-client.js build/
+cp src/manifest.json build/
+cp src/background.js build/
+cp src/content.js build/
+cp src/sidebar.html build/
+cp src/sidebar.css build/
+cp src/sidebar.js build/
+cp src/supabase-client.js build/
 
 # Copy the bundled Supabase library
-if [ -f "supabase.js" ]; then
-    cp supabase.js build/
+if [ -f "src/supabase.js" ]; then
+    cp src/supabase.js build/
     echo "✅ Bundled Supabase library included"
 else
     echo "⚠️  supabase.js not found - run 'npm run build' first"
 fi
 
 # Copy icons directory
-cp -r icons/ build/ 2>/dev/null || echo "⚠️  Icons directory not found"
+cp -r src/icons/ build/ 2>/dev/null || echo "⚠️  Icons directory not found"
 
 echo "✅ Extension built successfully in build/ directory"
 echo "📊 Build size:"

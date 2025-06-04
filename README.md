@@ -2,6 +2,8 @@
 
 A sidebar translator extension with multiple translation service providers.
 
+All extension source files now reside in the `src/` directory to keep the repository tidy.
+
 ## Recent Changes
 
 ### Improved Text Selection Behavior
