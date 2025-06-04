@@ -41,10 +41,8 @@ The extension now remembers your translation setup:
 
 ## Testing
 
-Use the included `test.html` file to test the extension:
-
 1. Load the extension in Chrome (Developer mode)
-2. Open `test.html` in a browser tab
+2. Open any webpage with selectable text
 3. Click the extension icon to enable the sidebar
 4. Test different selection scenarios:
    - Single words
@@ -58,7 +56,6 @@ Use the included `test.html` file to test the extension:
 - `sidebar.html`: Added selection display element
 - `sidebar.js`: Updated message handling for selection data
 - `sidebar.css`: Added styling for selection display
-- `test.html`: Created test page for validation
 
 ## Browser Compatibility
 
