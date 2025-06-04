@@ -3,6 +3,30 @@ const path = require('path');
 
 console.log('🔄 Building Supabase library for Chrome extension...');
 
+// Generate supabase-client.js from template using environment variables
+const url = process.env.SUPABASE_URL;
+const anonKey = process.env.SUPABASE_ANON_KEY;
+
+if (!url || !anonKey) {
+    console.error('❌ SUPABASE_URL or SUPABASE_ANON_KEY environment variables are missing.');
+    process.exit(1);
+}
+
+const templatePath = path.join(__dirname, 'supabase-client.template.js');
+const clientDestPath = path.join(__dirname, 'supabase-client.js');
+
+try {
+    let clientContent = fs.readFileSync(templatePath, 'utf8');
+    clientContent = clientContent
+        .replace('__SUPABASE_URL__', url)
+        .replace('__SUPABASE_ANON_KEY__', anonKey);
+    fs.writeFileSync(clientDestPath, clientContent);
+    console.log('✅ Generated supabase-client.js from template');
+} catch (err) {
+    console.error('❌ Failed to generate supabase-client.js:', err.message);
+    process.exit(1);
+}
+
 try {
     // Source path of the Supabase UMD build (corrected path)
     const sourcePath = path.join(__dirname, 'node_modules', '@supabase', 'supabase-js', 'dist', 'umd', 'supabase.js');

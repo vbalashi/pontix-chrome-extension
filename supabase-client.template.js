@@ -9,8 +9,8 @@
 const SUPABASE_CONFIG = {
     // Replace these with your actual Supabase project values
     // Get these from your Supabase dashboard: Settings > API
-    url: 'https://iyfwymlzdwtqruibeujc.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5Znd5bWx6ZHd0cXJ1aWJldWpjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg4ODcyNzYsImV4cCI6MjA2NDQ2MzI3Nn0.Cb1ouxrsNwr52jPH2F-DdbLzymlEiG4uXtnb5VVqlEg'
+    url: "__SUPABASE_URL__",
+    anonKey: "__SUPABASE_ANON_KEY__",
 };
 
 // ✅ Configuration completed with your Supabase project credentials
