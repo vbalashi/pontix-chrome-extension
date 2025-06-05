@@ -8,7 +8,11 @@ if (window.translatorExtensionLoaded) {
     console.log("🔄 Pontix v4.0 - Configurable Word Limits Loaded");
     console.log("🐛 Debug mode enabled - selection events will be logged");
     console.log("⏰ New behavior: Waits for mouse release/keyboard completion before processing");
+
     console.log("📊 New feature: Configurable word count limits in settings");
+
+    const SIDEBAR_WIDTH = 400; // Width of the sidebar in pixels
+    let layoutMode = "overlay"; // 'overlay' (default) or 'shift'
     
     // Track sidebar state
     let sidebarEnabled = false;
@@ -134,11 +138,17 @@ if (window.translatorExtensionLoaded) {
     function loadExtensionSettings() {
         try {
             chrome.storage.sync.get("translatorSettings", (result) => {
-                if (result.translatorSettings && result.translatorSettings.maxWordCount) {
-                    maxWordCount = result.translatorSettings.maxWordCount;
-                    console.log("📋 Loaded maxWordCount setting:", maxWordCount);
+                if (result.translatorSettings) {
+                    if (result.translatorSettings.maxWordCount) {
+                        maxWordCount = result.translatorSettings.maxWordCount;
+                        console.log("📋 Loaded maxWordCount setting:", maxWordCount);
+                    }
+                    if (result.translatorSettings.layoutMode) {
+                        layoutMode = result.translatorSettings.layoutMode;
+                        console.log("📋 Loaded layoutMode setting:", layoutMode);
+                    }
                 } else {
-                    console.log("📋 Using default maxWordCount:", maxWordCount);
+                    console.log("📋 Using default settings");
                 }
             });
         } catch (e) {
@@ -176,9 +186,13 @@ if (window.translatorExtensionLoaded) {
                                 document.body;
         
         if (contentContainer) {
-            // Adjust the width to make room for sidebar
-            contentContainer.style.maxWidth = "calc(100% - 400px)";
-            contentContainer.style.marginRight = "400px";
+            if (layoutMode === "shift") {
+                contentContainer.style.maxWidth = `calc(100% - ${SIDEBAR_WIDTH}px)`;
+                contentContainer.style.marginRight = `${SIDEBAR_WIDTH}px`;
+            } else {
+                contentContainer.style.maxWidth = "";
+                contentContainer.style.marginRight = "";
+            }
         }
     }
     
@@ -676,9 +690,8 @@ if (window.translatorExtensionLoaded) {
             return;
         }
         
-        // Instead of adding margin to body, just ensure sidebar positioning works
-        // Only add minimal margin to prevent content overlap
-        document.body.style.marginRight = "20px"; // Just a small buffer
+        const margin = layoutMode === "shift" ? `${SIDEBAR_WIDTH}px` : "20px";
+        document.body.style.marginRight = margin;
         document.body.style.transition = "margin-right 0.3s ease-in-out";
         document.body.setAttribute('data-translator-layout-adjusted', 'true');
         
@@ -889,9 +902,23 @@ if (window.translatorExtensionLoaded) {
         }
         
         if (message.action === "updateSettings") {
-            if (message.settings && message.settings.maxWordCount) {
-                maxWordCount = message.settings.maxWordCount;
-                console.log("📋 Updated maxWordCount setting from sidebar:", maxWordCount);
+            if (message.settings) {
+                if (message.settings.maxWordCount) {
+                    maxWordCount = message.settings.maxWordCount;
+                    console.log("📋 Updated maxWordCount setting from sidebar:", maxWordCount);
+                }
+                if (message.settings.layoutMode) {
+                    layoutMode = message.settings.layoutMode;
+                    console.log("📋 Updated layoutMode setting from sidebar:", layoutMode);
+                    if (sidebarEnabled && sidebarVisible) {
+                        resetPageLayoutAdjustments();
+                        if (isEdgeImmersiveMode) {
+                            adjustPageForImmersiveMode();
+                        } else {
+                            adjustPageLayoutForReader();
+                        }
+                    }
+                }
             }
             sendResponse({ success: true });
             return true;
@@ -953,7 +980,7 @@ if (window.translatorExtensionLoaded) {
         sidebar.style.position = "fixed";
         sidebar.style.right = "0";
         sidebar.style.top = "0";
-        sidebar.style.width = "400px";
+        sidebar.style.width = `${SIDEBAR_WIDTH}px`;
         sidebar.style.height = "100vh";
         sidebar.style.border = "none";
         sidebar.style.zIndex = "2147483647"; // Maximum z-index to ensure it's on top
@@ -1068,14 +1095,14 @@ if (window.translatorExtensionLoaded) {
     function hideSidebar() {
         const sidebar = document.getElementById("translator-sidebar");
         if (sidebar) {
-            sidebar.style.transform = "translateX(400px)";
+            sidebar.style.transform = `translateX(${SIDEBAR_WIDTH}px)`;
             sidebarVisible = false;
         }
         
         // Also check for alternative container
         const altContainer = document.getElementById("translator-sidebar-container");
         if (altContainer) {
-            altContainer.style.transform = "translateX(400px)";
+            altContainer.style.transform = `translateX(${SIDEBAR_WIDTH}px)`;
             sidebarVisible = false;
         }
     }

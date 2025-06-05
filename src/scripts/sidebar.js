@@ -90,6 +90,7 @@ let otpType = ''; // 'signup' or 'signin'
 let settings = {
     maxWordCount: 10, // Default maximum word count for translation
     debugSelection: false, // Show/hide selected text and sentence for debugging
+    layoutMode: 'overlay', // 'overlay' or 'shift'
     enabledProviders: {
         google: true,
         deepl: false,
@@ -933,6 +934,7 @@ async function syncFromSupabase() {
                 maxWordCount: settingsResult.data.max_word_count || settings.maxWordCount,
                 debugSelection: settingsResult.data.debug_selection !== undefined ? settingsResult.data.debug_selection : settings.debugSelection,
                 defaultTargetLanguage: settingsResult.data.default_target_language || settings.defaultTargetLanguage,
+                layoutMode: settingsResult.data.layout_mode || settings.layoutMode,
                 enabledProviders: {
                     ...settings.enabledProviders,
                     ...settingsResult.data.enabled_providers
@@ -1353,6 +1355,9 @@ function getCurrentSettings() {
     // Get debug selection setting
     const debugSelectionCheckbox = document.getElementById('debug-selection');
     const debugSelection = debugSelectionCheckbox ? debugSelectionCheckbox.checked : settings.debugSelection;
+
+    const layoutModeSelect = document.getElementById('layout-mode');
+    const layoutMode = layoutModeSelect ? layoutModeSelect.value : settings.layoutMode;
     
     // Get enabled providers from checkboxes
     const enabledProviders = {};
@@ -1375,7 +1380,8 @@ function getCurrentSettings() {
         enabledProviders: enabledProviders,
         apiKeys: apiKeys,
         defaultTargetLanguage: settings.defaultTargetLanguage,
-        translationBoxes: translationBoxes
+        translationBoxes: translationBoxes,
+        layoutMode: layoutMode
     };
 }
 
@@ -1876,7 +1882,7 @@ function saveSettings() {
     
     try {
         // Save user settings and dynamic data separately to avoid quota issues
-        chrome.storage.sync.set({ 
+        chrome.storage.sync.set({
             "translatorSettings": settings,
             "translatorDynamicData": dynamicData
         }, () => {
@@ -1884,6 +1890,14 @@ function saveSettings() {
                 console.error('SaveSettings: Error saving settings:', chrome.runtime.lastError);
             } else {
                 console.log('SaveSettings: Settings and dynamic data saved successfully');
+                try {
+                    chrome.runtime.sendMessage({
+                        action: 'updateSettings',
+                        settings: settings
+                    });
+                } catch (e) {
+                    console.error('SaveSettings: Failed to send update message:', e);
+                }
             }
         });
     } catch (error) {
@@ -2020,6 +2034,11 @@ function updateSettingsUI() {
     if (debugSelectionCheckbox) {
         debugSelectionCheckbox.checked = settings.debugSelection;
     }
+
+    const layoutModeSelect = document.getElementById('layout-mode');
+    if (layoutModeSelect) {
+        layoutModeSelect.value = settings.layoutMode;
+    }
     
     // Update provider checkboxes and API keys
     for (const provider in settings.enabledProviders) {
@@ -2089,6 +2108,11 @@ function setupEventListeners() {
             const debugSelectionCheckbox = document.getElementById('debug-selection');
             if (debugSelectionCheckbox) {
                 settings.debugSelection = debugSelectionCheckbox.checked;
+            }
+
+            const layoutModeSelect = document.getElementById('layout-mode');
+            if (layoutModeSelect) {
+                settings.layoutMode = layoutModeSelect.value;
             }
             
             // Update provider settings and track newly enabled providers
