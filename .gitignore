@@ -6,9 +6,6 @@ package-lock.json
 build/
 .build/
 dist/*.zip
-dist/*.tar.gz
-supabase-client.js
-supabase.js
 
 # Environment variables and sensitive data
 .env

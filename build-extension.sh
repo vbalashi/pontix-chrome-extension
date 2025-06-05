@@ -38,8 +38,21 @@ cp -r icons/ build/ 2>/dev/null || echo "⚠️  Icons directory not found"
 echo "✅ Extension built successfully in build/ directory"
 echo "📊 Build size:"
 du -sh build/
+
+# Create distribution zip automatically
+echo ""
+echo "📦 Creating distribution package..."
+mkdir -p dist/
+cd build/
+zip -r ../dist/pontix-extension.zip . > /dev/null
+cd ..
+echo "✅ Created dist/pontix-extension.zip"
+
 echo ""
 echo "🚀 Ready to load in Chrome Developer Mode:"
 echo "   1. Open Chrome Extensions (chrome://extensions/)"
 echo "   2. Enable Developer Mode"
-echo "   3. Click 'Load unpacked' and select the 'build' directory" 
+echo "   3. Click 'Load unpacked' and select the 'build' directory"
+echo ""
+echo "📤 Ready for Chrome Web Store:"
+echo "   Upload: dist/pontix-extension.zip" 

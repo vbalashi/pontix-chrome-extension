@@ -5,7 +5,8 @@
   "main": "src/scripts/background.js",
   "scripts": {
     "build": "node build-supabase.js",
-    "package": "npm run build && chmod +x build-extension.sh && ./build-extension.sh",
+    "repackage": "chmod +x build-extension.sh && ./build-extension.sh",
+    "package": "npm run build && npm run repackage",
     "clean": "rm -rf build/ dist/*.zip dist/*.tar.gz .build/",
     "dev": "npm run build && npm run package",
     "test": "jest",
