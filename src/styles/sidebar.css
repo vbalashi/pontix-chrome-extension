@@ -540,6 +540,16 @@ body {
     color: #1557b0;
 }
 
+.auth-advanced-link {
+    margin-top: 8px;
+    text-align: center;
+}
+
+.auth-advanced-options {
+    margin-top: 16px;
+    text-align: center;
+}
+
 .otp-instructions {
     font-size: 14px;
     color: #666;
