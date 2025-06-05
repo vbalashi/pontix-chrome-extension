@@ -86,6 +86,14 @@ npm run build    # Build Supabase client
 3. Click "Load unpacked"
 4. Select the `build/` directory
 
+## Permissions
+
+The extension requires host permissions for translation APIs as well as Google
+Books reader pages:
+
+- `https://play.google.com/*`
+- `https://books.googleusercontent.com/*`
+
 ## 📝 Available Scripts
 
 - `npm run build` - Build Supabase client from template
