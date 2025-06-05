@@ -409,7 +409,12 @@ async function getCurrentUser() {
     try {
         const { data: { user }, error } = await client.auth.getUser();
         if (error) {
-            console.error('Get user error:', error);
+            const msg = error.message || '';
+            if (msg.toLowerCase().includes('auth session missing')) {
+                console.log('Get user: no active session');
+            } else {
+                console.error('Get user error:', error);
+            }
             return { data: { user: null }, error: error.message };
         }
         
@@ -431,7 +436,12 @@ async function getCurrentSession() {
     try {
         const { data: { session }, error } = await client.auth.getSession();
         if (error) {
-            console.error('Get session error:', error);
+            const msg = error.message || '';
+            if (msg.toLowerCase().includes('auth session missing')) {
+                console.log('Get session: no active session');
+            } else {
+                console.error('Get session error:', error);
+            }
             return { data: { session: null }, error: error.message };
         }
         
