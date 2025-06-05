@@ -45,6 +45,36 @@ const signinMessage = document.getElementById("signin-message");
 const signupMessage = document.getElementById("signup-message");
 const syncMessage = document.getElementById("sync-message");
 
+// New auth flow DOM elements
+const emailStepForm = document.getElementById("email-step-form");
+const emailStepTitle = document.getElementById("email-step-title");
+const emailStepDescription = document.getElementById("email-step-description");
+const emailStepInput = document.getElementById("email-step-input");
+const emailStepSubmit = document.getElementById("email-step-submit");
+const emailStepCancel = document.getElementById("email-step-cancel");
+const emailStepMessage = document.getElementById("email-step-message");
+
+const tokenStepForm = document.getElementById("token-step-form");
+const tokenStepTitle = document.getElementById("token-step-title");
+const tokenStepDescription = document.getElementById("token-step-description");
+const tokenStepInput = document.getElementById("token-step-input");
+const tokenStepSubmit = document.getElementById("token-step-submit");
+const tokenStepCancel = document.getElementById("token-step-cancel");
+const tokenStepResend = document.getElementById("token-step-resend");
+const tokenStepMessage = document.getElementById("token-step-message");
+
+const passwordStepForm = document.getElementById("password-step-form");
+const passwordStepTitle = document.getElementById("password-step-title");
+const passwordStepWarning = document.getElementById("password-step-warning");
+const passwordStepInput = document.getElementById("password-step-input");
+const passwordStepSubmit = document.getElementById("password-step-submit");
+const passwordStepCancel = document.getElementById("password-step-cancel");
+const passwordStepMessage = document.getElementById("password-step-message");
+
+// Password toggle buttons
+const signinPasswordToggle = document.getElementById("signin-password-toggle");
+const passwordStepToggle = document.getElementById("password-step-toggle");
+
 // OTP-related DOM elements
 const signupOtpButton = document.getElementById("signup-otp-button");
 const signinOtpButton = document.getElementById("signin-otp-button");
@@ -87,6 +117,10 @@ const SYNC_RETRY_DELAY = [1000, 2000, 5000]; // Exponential backoff delays
 // OTP state management
 let otpEmail = '';
 let otpType = ''; // 'signup' or 'signin'
+
+// New auth flow tracking
+let currentAuthFlow = ''; // 'signup' or 'reset'
+let currentAuthEmail = '';
 
 // Default settings
 let settings = {
@@ -751,6 +785,194 @@ async function handleOtpResend() {
     }
 }
 
+// New authentication flow handlers
+
+// Handle email step submission (for both signup and password reset)
+async function handleEmailStep() {
+    const email = emailStepInput?.value;
+    
+    if (!email) {
+        showAuthMessage(emailStepMessage, 'Please enter your email.', 'error');
+        return;
+    }
+    
+    try {
+        showAuthMessage(emailStepMessage, 'Sending verification code...', 'info');
+        emailStepSubmit.disabled = true;
+        
+        let result;
+        if (currentAuthFlow === 'signup') {
+            result = await window.SupabaseAuth.signUpWithOtp(email);
+        } else if (currentAuthFlow === 'reset') {
+            result = await window.SupabaseAuth.signInWithOtp(email);
+        }
+        
+        const { data, error } = result;
+        
+        if (error) {
+            showAuthMessage(emailStepMessage, error, 'error');
+        } else {
+            showAuthMessage(emailStepMessage, 'Verification code sent! Check your email.', 'success');
+            currentAuthEmail = email;
+            
+            // Show token verification form
+            setTimeout(() => {
+                showTokenStepForm();
+            }, 1500);
+        }
+    } catch (err) {
+        console.error('🔐 Email step error:', err);
+        showAuthMessage(emailStepMessage, 'Failed to send verification code. Please try again.', 'error');
+    } finally {
+        emailStepSubmit.disabled = false;
+    }
+}
+
+// Handle token verification
+async function handleTokenStep() {
+    const code = tokenStepInput?.value;
+    
+    if (!code || code.length !== 6) {
+        showAuthMessage(tokenStepMessage, 'Please enter a valid 6-digit code.', 'error');
+        return;
+    }
+    
+    try {
+        showAuthMessage(tokenStepMessage, 'Verifying code...', 'info');
+        tokenStepSubmit.disabled = true;
+        
+        // Use different verification methods based on the flow
+        let result;
+        if (currentAuthFlow === 'signup') {
+            result = await window.SupabaseAuth.verifyEmailOtp(currentAuthEmail, code);
+        } else {
+            result = await window.SupabaseAuth.verifyOtp(currentAuthEmail, code, 'email');
+        }
+        const { data, error } = result;
+        
+        if (error) {
+            showAuthMessage(tokenStepMessage, error, 'error');
+        } else {
+            showAuthMessage(tokenStepMessage, 'Verification successful!', 'success');
+            
+            // Clear token input
+            tokenStepInput.value = '';
+            
+            // Show password step form
+            setTimeout(() => {
+                showPasswordStepForm();
+            }, 1500);
+        }
+    } catch (err) {
+        console.error('🔐 Token verification error:', err);
+        showAuthMessage(tokenStepMessage, 'Verification failed. Please try again.', 'error');
+    } finally {
+        tokenStepSubmit.disabled = false;
+    }
+}
+
+// Handle password setting
+async function handlePasswordStep() {
+    const password = passwordStepInput?.value;
+    
+    if (!password) {
+        showAuthMessage(passwordStepMessage, 'Please enter a password.', 'error');
+        return;
+    }
+    
+    if (password.length < 6) {
+        showAuthMessage(passwordStepMessage, 'Password must be at least 6 characters long.', 'error');
+        return;
+    }
+    
+    try {
+        showAuthMessage(passwordStepMessage, 'Setting password...', 'info');
+        passwordStepSubmit.disabled = true;
+        
+        // For signup, the user is already created via OTP
+        // For password reset, we need to update the password
+        if (currentAuthFlow === 'reset') {
+            const { error } = await window.SupabaseAuth.updatePassword(password);
+            if (error) {
+                showAuthMessage(passwordStepMessage, error, 'error');
+                return;
+            }
+        }
+        
+        showAuthMessage(passwordStepMessage, 'Password set successfully!', 'success');
+        
+        // Store password for encryption
+        userPassword = password;
+        
+        // Clear form
+        passwordStepInput.value = '';
+        
+        // Update auth status
+        await checkAuthStatus();
+        
+        // Hide forms
+        hideAuthForms();
+        
+    } catch (err) {
+        console.error('🔐 Password step error:', err);
+        showAuthMessage(passwordStepMessage, 'Failed to set password. Please try again.', 'error');
+    } finally {
+        passwordStepSubmit.disabled = false;
+    }
+}
+
+// Handle token resend
+async function handleTokenResend() {
+    if (!currentAuthEmail || !currentAuthFlow) {
+        showAuthMessage(tokenStepMessage, 'Unable to resend code. Please start over.', 'error');
+        return;
+    }
+    
+    try {
+        showAuthMessage(tokenStepMessage, 'Resending verification code...', 'info');
+        tokenStepResend.disabled = true;
+        
+        let result;
+        if (currentAuthFlow === 'signup') {
+            result = await window.SupabaseAuth.signUpWithOtp(currentAuthEmail);
+        } else if (currentAuthFlow === 'reset') {
+            result = await window.SupabaseAuth.signInWithOtp(currentAuthEmail);
+        }
+        
+        const { data, error } = result;
+        
+        if (error) {
+            showAuthMessage(tokenStepMessage, error, 'error');
+        } else {
+            showAuthMessage(tokenStepMessage, 'Verification code resent! Check your email.', 'success');
+        }
+    } catch (err) {
+        console.error('🔐 Token resend error:', err);
+        showAuthMessage(tokenStepMessage, 'Failed to resend code. Please try again.', 'error');
+    } finally {
+        tokenStepResend.disabled = false;
+    }
+}
+
+// Handle password toggle visibility
+function togglePasswordVisibility(inputId, toggleButton) {
+    const input = document.getElementById(inputId);
+    if (!input || !toggleButton) return;
+    
+    const eyeIcon = toggleButton.querySelector('.eye-icon');
+    if (!eyeIcon) return;
+    
+    if (input.type === 'password') {
+        input.type = 'text';
+        eyeIcon.innerHTML = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24M1 1l22 22"/>';
+        toggleButton.setAttribute('aria-label', 'Hide password');
+    } else {
+        input.type = 'password';
+        eyeIcon.innerHTML = '<path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>';
+        toggleButton.setAttribute('aria-label', 'Show password');
+    }
+}
+
 // Helper function to check if we can attempt sync
 function canAttemptSync() {
     if (syncInProgress) {
@@ -1115,10 +1337,15 @@ function showSignUpForm() {
 function hideAuthForms() {
     authLocalMode && authLocalMode.classList.add('hidden');
     signinForm.classList.add('hidden');
-    signupForm.classList.add('hidden');
-    signupOtpForm.classList.add('hidden');
-    signinOtpForm.classList.add('hidden');
-    otpVerifyForm.classList.add('hidden');
+    signupForm && signupForm.classList.add('hidden');
+    signupOtpForm && signupOtpForm.classList.add('hidden');
+    signinOtpForm && signinOtpForm.classList.add('hidden');
+    otpVerifyForm && otpVerifyForm.classList.add('hidden');
+    
+    // Hide new auth forms
+    emailStepForm && emailStepForm.classList.add('hidden');
+    tokenStepForm && tokenStepForm.classList.add('hidden');
+    passwordStepForm && passwordStepForm.classList.add('hidden');
     
     // Clear messages
     if (signinMessage) signinMessage.style.display = 'none';
@@ -1127,6 +1354,13 @@ function hideAuthForms() {
     if (signinOtpMessage) signinOtpMessage.style.display = 'none';
     if (otpVerifyMessage) otpVerifyMessage.style.display = 'none';
     if (enableCloudSyncMessage) enableCloudSyncMessage.style.display = 'none';
+    if (emailStepMessage) emailStepMessage.style.display = 'none';
+    if (tokenStepMessage) tokenStepMessage.style.display = 'none';
+    if (passwordStepMessage) passwordStepMessage.style.display = 'none';
+    
+    // Reset auth flow state
+    currentAuthFlow = '';
+    currentAuthEmail = '';
 }
 
 // Show specific OTP forms
@@ -1142,12 +1376,68 @@ function showSignInOtpForm() {
 
 function showOtpVerifyForm() {
     hideAuthForms();
-    otpVerifyForm.classList.remove('hidden');
+    otpVerifyForm && otpVerifyForm.classList.remove('hidden');
     
     // Focus on OTP input
     const otpInput = document.getElementById('otp-code');
     if (otpInput) {
         setTimeout(() => otpInput.focus(), 100);
+    }
+}
+
+// New auth flow form functions
+function showEmailStepForm(flow) {
+    hideAuthForms();
+    currentAuthFlow = flow;
+    
+    if (emailStepForm) {
+        emailStepForm.classList.remove('hidden');
+        
+        // Update form content based on flow
+        if (flow === 'signup') {
+            emailStepTitle.textContent = 'Sign Up';
+            emailStepDescription.textContent = 'Enter your email address to get started';
+        } else if (flow === 'reset') {
+            emailStepTitle.textContent = 'Reset Password';
+            emailStepDescription.textContent = 'Enter your email address to reset your password';
+        }
+        
+        // Focus on email input
+        setTimeout(() => emailStepInput?.focus(), 100);
+    }
+}
+
+function showTokenStepForm() {
+    hideAuthForms();
+    if (tokenStepForm) {
+        tokenStepForm.classList.remove('hidden');
+        
+        // Update description
+        if (tokenStepDescription) {
+            tokenStepDescription.textContent = `We've sent a 6-digit verification code to ${currentAuthEmail}. Please enter it below:`;
+        }
+        
+        // Focus on token input
+        setTimeout(() => tokenStepInput?.focus(), 100);
+    }
+}
+
+function showPasswordStepForm() {
+    hideAuthForms();
+    if (passwordStepForm) {
+        passwordStepForm.classList.remove('hidden');
+        
+        // Update content based on flow
+        if (currentAuthFlow === 'signup') {
+            passwordStepTitle.textContent = 'Create Password';
+            passwordStepWarning.style.display = 'block';
+        } else if (currentAuthFlow === 'reset') {
+            passwordStepTitle.textContent = 'Reset Password';
+            passwordStepWarning.style.display = 'block';
+        }
+        
+        // Focus on password input
+        setTimeout(() => passwordStepInput?.focus(), 100);
     }
 }
 
@@ -2414,11 +2704,11 @@ function setupEventListeners() {
     }
     
     if (showSigninButton) {
-        showSigninButton.addEventListener('click', showSignInOtpForm);
+        showSigninButton.addEventListener('click', showSignInForm);
     }
     
     if (showSignupButton) {
-        showSignupButton.addEventListener('click', showSignUpOtpForm);
+        showSignupButton.addEventListener('click', () => showEmailStepForm('signup'));
     }
     
     if (signinSubmit) {
@@ -2459,7 +2749,7 @@ function setupEventListeners() {
     }
 
     if (passwordResetButton) {
-        passwordResetButton.addEventListener('click', handlePasswordReset);
+        passwordResetButton.addEventListener('click', () => showEmailStepForm('reset'));
     }
     
     if (signupOtpSend) {
@@ -2502,6 +2792,78 @@ function setupEventListeners() {
         // Auto-format OTP input (numbers only)
         otpCodeInput.addEventListener('input', (e) => {
             e.target.value = e.target.value.replace(/[^0-9]/g, '').slice(0, 6);
+        });
+    }
+    
+    // New auth flow event listeners
+    if (emailStepSubmit) {
+        emailStepSubmit.addEventListener('click', handleEmailStep);
+    }
+    
+    if (emailStepCancel) {
+        emailStepCancel.addEventListener('click', hideAuthForms);
+    }
+    
+    if (tokenStepSubmit) {
+        tokenStepSubmit.addEventListener('click', handleTokenStep);
+    }
+    
+    if (tokenStepCancel) {
+        tokenStepCancel.addEventListener('click', hideAuthForms);
+    }
+    
+    if (tokenStepResend) {
+        tokenStepResend.addEventListener('click', handleTokenResend);
+    }
+    
+    if (passwordStepSubmit) {
+        passwordStepSubmit.addEventListener('click', handlePasswordStep);
+    }
+    
+    if (passwordStepCancel) {
+        passwordStepCancel.addEventListener('click', hideAuthForms);
+    }
+    
+    // Password toggle event listeners
+    if (signinPasswordToggle) {
+        signinPasswordToggle.addEventListener('click', () => {
+            togglePasswordVisibility('signin-password', signinPasswordToggle);
+        });
+    }
+    
+    if (passwordStepToggle) {
+        passwordStepToggle.addEventListener('click', () => {
+            togglePasswordVisibility('password-step-input', passwordStepToggle);
+        });
+    }
+    
+    // Add Enter key support for new auth forms
+    if (emailStepInput) {
+        emailStepInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleEmailStep();
+            }
+        });
+    }
+    
+    if (tokenStepInput) {
+        tokenStepInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleTokenStep();
+            }
+        });
+        
+        // Auto-format token input (numbers only)
+        tokenStepInput.addEventListener('input', (e) => {
+            e.target.value = e.target.value.replace(/[^0-9]/g, '').slice(0, 6);
+        });
+    }
+    
+    if (passwordStepInput) {
+        passwordStepInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handlePasswordStep();
+            }
         });
     }
     

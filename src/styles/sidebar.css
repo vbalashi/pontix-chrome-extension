@@ -604,6 +604,75 @@ body {
     background-color: #fce8e6;
 }
 
+/* Password Input Container */
+.password-input-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.password-input-container input {
+    flex: 1;
+    padding-right: 40px;
+}
+
+.password-toggle {
+    position: absolute;
+    right: 8px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #666;
+    transition: color 0.2s, background-color 0.2s;
+}
+
+.password-toggle:hover {
+    color: #333;
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.password-toggle .eye-icon {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+}
+
+/* Password Warning */
+.password-warning {
+    background-color: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 16px;
+}
+
+.password-warning p {
+    margin: 0;
+    font-size: 14px;
+    color: #856404;
+    line-height: 1.4;
+}
+
+/* Token/Email Step Instructions */
+.token-instructions {
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 16px;
+    line-height: 1.4;
+    text-align: center;
+}
+
+/* Improved auth reset styling */
+.auth-reset {
+    margin-top: 12px;
+    text-align: center;
+}
+
 .general-settings-section, 
 .provider-settings-section,
 .profile-management-section {
