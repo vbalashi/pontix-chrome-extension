@@ -318,8 +318,8 @@ async function verifyEmailOtp(email, token) {
     if (!client) return { error: 'Supabase client not available' };
     
     try {
-        // For OTP verification, use token only (not email + token)
         const { data, error } = await client.auth.verifyOtp({
+            email: email,
             token: token,
             type: 'email'
         });
@@ -407,8 +407,8 @@ async function verifyOtp(email, token, type = 'email') {
     if (!client) return { error: 'Supabase client not available' };
     
     try {
-        // For OTP verification, use token only (not email + token)
         const { data, error } = await client.auth.verifyOtp({
+            email: email,
             token: token,
             type: type
         });
