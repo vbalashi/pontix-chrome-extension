@@ -1,63 +1,152 @@
-# Chrome Translator Extension
+# Pontix Chrome Extension
 
-A sidebar translator extension with multiple translation service providers.
+A Chrome extension for translation with multiple providers and cloud sync capabilities powered by Supabase.
 
-## Recent Changes
+## 📁 Project Structure
 
-### Improved Text Selection Behavior
+```
+translate-extension/
+├── src/                          # Source code
+│   ├── scripts/                  # JavaScript files
+│   │   ├── background.js         # Background script
+│   │   ├── content.js            # Content script
+│   │   ├── sidebar.js            # Sidebar logic
+│   │   └── supabase-client.template.js  # Supabase client template
+│   ├── styles/                   # CSS files
+│   │   └── sidebar.css           # Sidebar styles
+│   ├── html/                     # HTML files
+│   │   ├── sidebar.html          # Main sidebar
+│   │   └── test-*.html           # Test pages
+│   └── manifest/                 # Extension manifest
+│       └── manifest.json         # Chrome extension manifest
+├── docs/                         # Documentation
+├── build/                        # Build output (generated)
+├── .build/                       # Generated files (gitignored)
+│   ├── supabase-client.js        # Generated from template
+│   └── supabase.js               # Bundled Supabase library
+├── dist/                         # Distribution packages
+├── icons/                        # Extension icons
+├── graphics/                     # Graphics working directory (gitignored)
+├── node_modules/                 # Dependencies (gitignored)
+├── .env                          # Environment variables (gitignored)
+├── .env.example                  # Environment template
+├── package.json                  # Node.js configuration
+├── build-extension.sh            # Build script
+├── build-supabase.js             # Supabase build script
+└── .gitignore                    # Git ignore rules
+```
 
-The extension now properly handles text selection by waiting for the user to finish selecting before processing the text for translation.
+## 🚀 Quick Start
 
-#### Key Improvements:
+### 1. Setup Environment
 
-1. **Selection Change Detection**: Uses `selectionchange` event to detect when the user is actively selecting text
-2. **Debounced Processing**: Waits 500ms after selection stops changing before processing
-3. **Duplicate Prevention**: Prevents processing the same selection multiple times
-4. **Extended Phrase Support**: Increased word limit from 5 to 10 words for longer phrases
-5. **Persistent Layout**: Translation boxes and their settings are now saved and restored when the extension is reopened
+```bash
+# Clone the repository
+git clone <repository-url>
+cd translate-extension
 
-#### New Debug Feature:
+# Install dependencies
+npm install
 
-- **Selection Display**: The sidebar now shows the exact selected text in a red-bordered box for debugging purposes
-- **Simplified Display**:
-  - Selected text (exact selection in red box)
-  - Context sentence (containing sentence)
-- **Enhanced Logging**: Added comprehensive logging for DeepL API debugging
+# Setup environment variables
+npm run setup
+# Then edit .env file with your Supabase credentials
+```
 
-#### How It Works:
+### 2. Configure Supabase
 
-1. **Double-click + Drag**: When you double-click a word and then drag to extend the selection, the extension waits until you release the mouse and stop changing the selection
-2. **Selection Finalization**: Only after 500ms of no selection changes does the extension process the final selection
-3. **Context Extraction**: The extension finds the complete sentence(s) containing the selected text for better translation context
+1. Go to [Supabase Dashboard](https://supabase.com/dashboard)
+2. Create a new project or select existing one
+3. Go to Settings > API
+4. Copy your Project URL and anon/public key
+5. Update `.env` file:
 
-## Persistent Layout
+```env
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_ANON_KEY=your-anon-key-here
+```
 
-The extension now remembers your translation setup:
+### 3. Build and Package
 
-- **Saved Providers**: Which translation services you've added (Google, DeepL, etc.)
-- **Target Languages**: The target language setting for each provider
-- **Automatic Restore**: Your layout is restored when you reopen the browser or reload the extension
-- **Smart Filtering**: Disabled providers are automatically filtered out when restoring
+**RECOMMENDED**: Use the complete build command:
+```bash
+npm run package
+```
 
-## Testing
+**Alternative**: Step by step:
+```bash
+npm run build    # Build Supabase client
+./build-extension.sh  # Package extension
+```
 
-1. Load the extension in Chrome (Developer mode)
-2. Open any webpage with selectable text
-3. Click the extension icon to enable the sidebar
-4. Test different selection scenarios:
-   - Single words
-   - Short phrases
-   - Complete sentences
-   - Text with links and formatting
+### 4. Load in Chrome
 
-## Files Modified
+1. Open Chrome Extensions (`chrome://extensions/`)
+2. Enable "Developer mode"
+3. Click "Load unpacked"
+4. Select the `build/` directory
 
-- `content.js`: Updated selection detection logic
-- `sidebar.html`: Added selection display element
-- `sidebar.js`: Updated message handling for selection data
-- `sidebar.css`: Added styling for selection display
+## 📝 Available Scripts
 
-## Browser Compatibility
+- `npm run build` - Build Supabase client from template
+- `npm run package` - **Complete build and package** (recommended)
+- `npm run dev` - Build and package in one command
+- `npm run clean` - Clean build artifacts
+- `npm run setup` - Setup environment configuration
+- `npm test` - Run tests
 
-- Chrome (Manifest V3)
-- Edge (including Immersive Reader mode) 
+## 🔧 Build Process Explained
+
+### What should you run?
+
+**✅ RECOMMENDED**: `npm run package`
+- This is the complete command that handles everything
+- Loads environment variables from `.env` file automatically
+- Generates Supabase files and packages the extension
+
+**Alternative**: `./build-extension.sh` 
+- Only packages the extension (requires previous build)
+- Use this if you only want to re-package without rebuilding Supabase files
+
+### Build Steps
+
+1. **Supabase Client Generation** (`npm run build`)
+   - Loads environment variables from `.env` file using `dotenv`
+   - Reads `src/scripts/supabase-client.template.js`
+   - Replaces `__SUPABASE_URL__` and `__SUPABASE_ANON_KEY__` placeholders
+   - Generates `supabase-client.js` in `.build/` directory
+   - Copies Supabase library to `.build/supabase.js`
+
+2. **Extension Packaging** (`./build-extension.sh`)
+   - Copies source files from `src/` to `build/`
+   - Includes generated files from `.build/`
+   - Creates production-ready extension in `build/` directory
+
+## 🔒 Security & File Organization
+
+**Generated Files**: 
+- ✅ Stored in `.build/` directory (gitignored)
+- ✅ Keeps root directory clean
+- ✅ No credentials exposed in version control
+
+**Environment Variables**:
+- ✅ Automatically loaded from `.env` file
+- ✅ Validated before build process
+- ✅ Template system prevents credential exposure
+
+## 📦 Distribution
+
+Built packages are stored in `dist/` directory:
+- `*.zip` files for Chrome Web Store
+- `*.tar.gz` files for distribution
+
+## 🤝 Contributing
+
+1. Follow the existing code structure
+2. Update documentation for any new features
+3. Test thoroughly before submitting
+4. Ensure build process works correctly
+
+## 📄 License
+
+ISC License - see package.json for details. 

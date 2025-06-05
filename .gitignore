@@ -1,22 +1,56 @@
-node_modules
+# Dependencies
+node_modules/
 package-lock.json
-*.log
-.DS_Store
-debug_selection_implementation.md
-sidebar_backup*.js
-test*.html
-supabase_setup.md
-TESTING_GUIDE.md
-README.md
-.git/
-.cursor/
+
+# Build outputs and generated files
 build/
-graphics/
-*.zip
-test*
-TESTING_GUIDE.md
-*backup*
-*.gz
-.cursor/
-TESTING_GUIDE.md
+.build/
+dist/*.zip
+dist/*.tar.gz
 supabase-client.js
+supabase.js
+
+# Environment variables and sensitive data
+.env
+.env.local
+.env.development
+.env.production
+*.key
+*.pem
+*.p12
+
+# Operating System
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE and Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temporary files
+*.tmp
+*.temp
+*backup*
+test-*.html
+debug_*.md
+
+# Graphics working directory (keep icons/ but not graphics/)
+graphics/
+
+# Documentation that shouldn't be committed
+TESTING_GUIDE.md

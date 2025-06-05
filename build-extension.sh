@@ -7,22 +7,29 @@ echo "🔧 Building Chrome Extension..."
 rm -rf build/
 mkdir -p build/
 
-# Copy essential files only
+# Copy essential files from src directory
 echo "📁 Copying essential files..."
-cp manifest.json build/
-cp background.js build/
-cp content.js build/
-cp sidebar.html build/
-cp sidebar.css build/
-cp sidebar.js build/
-cp supabase-client.js build/
+cp src/manifest/manifest.json build/
+cp src/scripts/background.js build/
+cp src/scripts/content.js build/
+cp src/html/sidebar.html build/
+cp src/styles/sidebar.css build/
+cp src/scripts/sidebar.js build/
 
-# Copy the bundled Supabase library
-if [ -f "supabase.js" ]; then
-    cp supabase.js build/
+# Copy the generated supabase-client.js (from .build directory)
+if [ -f ".build/supabase-client.js" ]; then
+    cp .build/supabase-client.js build/
+    echo "✅ Generated Supabase client included"
+else
+    echo "⚠️  supabase-client.js not found in .build/ - run 'npm run build' first"
+fi
+
+# Copy the bundled Supabase library (from .build directory)
+if [ -f ".build/supabase.js" ]; then
+    cp .build/supabase.js build/
     echo "✅ Bundled Supabase library included"
 else
-    echo "⚠️  supabase.js not found - run 'npm run build' first"
+    echo "⚠️  supabase.js not found in .build/ - run 'npm run build' first"
 fi
 
 # Copy icons directory

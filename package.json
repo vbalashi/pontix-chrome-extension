@@ -1,19 +1,37 @@
 {
   "name": "pontix-extension",
   "version": "1.0.0",
-  "description": "Chrome extension for translation with multiple providers",
+  "description": "Chrome extension for translation with multiple providers and cloud sync",
+  "main": "src/scripts/background.js",
   "scripts": {
     "build": "node build-supabase.js",
-    "package": "chmod +x build-extension.sh && ./build-extension.sh",
-    "test": "jest"
+    "package": "npm run build && chmod +x build-extension.sh && ./build-extension.sh",
+    "clean": "rm -rf build/ dist/*.zip dist/*.tar.gz .build/",
+    "dev": "npm run build && npm run package",
+    "test": "jest",
+    "setup": "cp .env.example .env && echo 'Please edit .env file with your Supabase credentials'"
   },
+  "keywords": [
+    "chrome-extension",
+    "translation",
+    "supabase",
+    "browser-extension"
+  ],
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0"
   },
   "devDependencies": {
+    "dotenv": "^16.0.0",
     "jest": "^29.7.0",
     "jest-environment-jsdom": "^30.0.0-beta.3",
     "jsdom": "^26.1.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "."
   },
   "author": "",
   "license": "ISC"
