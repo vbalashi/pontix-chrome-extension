@@ -51,6 +51,7 @@ const signinOtpButton = document.getElementById("signin-otp-button");
 const signupOtpForm = document.getElementById("signup-otp-form");
 const signinOtpForm = document.getElementById("signin-otp-form");
 const otpVerifyForm = document.getElementById("otp-verify-form");
+const passwordResetButton = document.getElementById("password-reset-button");
 const signupOtpSend = document.getElementById("signup-otp-send");
 const signupOtpCancel = document.getElementById("signup-otp-cancel");
 const signinOtpSend = document.getElementById("signin-otp-send");
@@ -73,6 +74,7 @@ const advancedAuthCancel = document.getElementById("advanced-auth-cancel");
 let isAuthenticated = false;
 let currentUser = null;
 let syncEnabled = false;
+let userPassword = null;
 
 // Sync state management - add these new variables
 let syncInProgress = false;
@@ -529,11 +531,13 @@ async function handleSignIn() {
         signinSubmit.disabled = true;
         
         const { data, error } = await window.SupabaseAuth.signIn(email, password);
-        
+
         if (error) {
             showAuthMessage(signinMessage, error, 'error');
         } else {
             showAuthMessage(signinMessage, 'Signed in successfully!', 'success');
+
+            userPassword = password;
             
             // Clear form
             document.getElementById('signin-email').value = '';
@@ -553,6 +557,32 @@ async function handleSignIn() {
     }
 }
 
+async function handlePasswordReset() {
+    const email = document.getElementById('signin-email')?.value;
+    if (!email) {
+        showAuthMessage(signinMessage, 'Please enter your email above and try again.', 'error');
+        return;
+    }
+
+    try {
+        showAuthMessage(signinMessage, 'Sending password reset email...', 'info');
+        passwordResetButton.disabled = true;
+
+        const { error } = await window.SupabaseAuth.resetPassword(email);
+
+        if (error) {
+            showAuthMessage(signinMessage, error, 'error');
+        } else {
+            showAuthMessage(signinMessage, 'Password reset email sent.', 'success');
+        }
+    } catch (err) {
+        console.error('🔐 Password reset error:', err);
+        showAuthMessage(signinMessage, 'Failed to send reset email.', 'error');
+    } finally {
+        passwordResetButton.disabled = false;
+    }
+}
+
 // Handle sign out
 async function handleSignOut() {
     try {
@@ -566,6 +596,7 @@ async function handleSignOut() {
             isAuthenticated = false;
             currentUser = null;
             syncEnabled = false;
+            userPassword = null;
             updateAuthUI(false);
             showSyncMessage('Signed out successfully.', 'success');
         }
@@ -812,7 +843,7 @@ async function syncToSupabase() {
         
         // Save global settings
         console.log('🔄 Saving user settings...');
-        const settingsResult = await window.SupabaseAuth.saveUserSettings(settings);
+        const settingsResult = await window.SupabaseAuth.saveUserSettings(settings, userPassword);
         if (settingsResult.error) {
             throw new Error(`Settings sync failed: ${settingsResult.error}`);
         }
@@ -922,7 +953,7 @@ async function syncFromSupabase() {
         
         // Load global settings
         console.log('🔄 Loading user settings...');
-        const settingsResult = await window.SupabaseAuth.loadUserSettings();
+        const settingsResult = await window.SupabaseAuth.loadUserSettings(userPassword);
         if (settingsResult.error && settingsResult.error !== 'User not authenticated') {
             throw new Error(`Settings load failed: ${settingsResult.error}`);
         }
@@ -966,6 +997,12 @@ async function syncFromSupabase() {
             }
             
             console.log('🔄 Loaded settings from Supabase');
+
+            if (settingsResult.decryptionFailed) {
+                showSyncMessage('API keys could not be decrypted. They have been cleared.', 'error');
+                settings.apiKeys = {};
+                await window.SupabaseAuth.saveUserSettings(settings, userPassword);
+            }
         }
         
         // Load profiles
@@ -2419,6 +2456,10 @@ function setupEventListeners() {
     
     if (signinOtpButton) {
         signinOtpButton.addEventListener('click', showSignInOtpForm);
+    }
+
+    if (passwordResetButton) {
+        passwordResetButton.addEventListener('click', handlePasswordReset);
     }
     
     if (signupOtpSend) {

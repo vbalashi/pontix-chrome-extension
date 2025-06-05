@@ -198,6 +198,57 @@ async function enableCloudSync() {
     }
 }
 
+// ======================
+// Encryption helpers
+// ======================
+async function deriveEncryptionKey(password, salt) {
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+        {
+            name: 'PBKDF2',
+            salt,
+            iterations: 100000,
+            hash: 'SHA-256'
+        },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+    );
+}
+
+async function encryptApiKeys(apiKeys, password) {
+    if (!password) return null;
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await deriveEncryptionKey(password, salt);
+    const encoded = new TextEncoder().encode(JSON.stringify(apiKeys));
+    const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded));
+    const combined = new Uint8Array(salt.length + iv.length + cipher.length);
+    combined.set(salt, 0);
+    combined.set(iv, salt.length);
+    combined.set(cipher, salt.length + iv.length);
+    return btoa(String.fromCharCode(...combined));
+}
+
+async function decryptApiKeys(encrypted, password) {
+    if (!encrypted || !password) return null;
+    try {
+        const bytes = Uint8Array.from(atob(encrypted), c => c.charCodeAt(0));
+        const salt = bytes.slice(0, 16);
+        const iv = bytes.slice(16, 28);
+        const cipher = bytes.slice(28);
+        const key = await deriveEncryptionKey(password, salt);
+        const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, cipher);
+        const decoded = new TextDecoder().decode(plain);
+        return JSON.parse(decoded);
+    } catch (e) {
+        console.error('Failed to decrypt API keys:', e);
+        return null;
+    }
+}
+
 // Authentication functions with local mode fallback
 async function signUp(email, password) {
     if (isInLocalMode()) {
@@ -398,6 +449,32 @@ async function signOut() {
     }
 }
 
+async function resetPassword(email) {
+    if (isInLocalMode()) {
+        return { error: 'Cloud sync not available. Extension running in local mode.' };
+    }
+
+    const client = getSupabaseClient();
+    if (!client) return { error: 'Supabase client not available' };
+
+    try {
+        const { data, error } = await client.auth.resetPasswordForEmail(email, {
+            redirectTo: getExtensionRedirectUrl()
+        });
+
+        if (error) {
+            console.error('Reset password error:', error);
+            return { error: error.message };
+        }
+
+        console.log('Reset password request sent:', data);
+        return { data, error: null };
+    } catch (err) {
+        console.error('Reset password exception:', err);
+        return { error: 'Reset password failed' };
+    }
+}
+
 async function getCurrentUser() {
     if (isInLocalMode()) {
         return { data: { user: null }, error: null };
@@ -453,7 +530,7 @@ async function getCurrentSession() {
 }
 
 // Data storage functions with local mode fallback
-async function saveUserSettings(settings) {
+async function saveUserSettings(settings, password = null) {
     if (isInLocalMode()) {
         console.log('📱 Local mode: Settings saved locally only');
         return { data: null, error: null };
@@ -466,6 +543,8 @@ async function saveUserSettings(settings) {
         const { data: { user } } = await client.auth.getUser();
         if (!user) return { error: 'User not authenticated' };
         
+        const encryptedKeys = password ? await encryptApiKeys(settings.apiKeys || {}, password) : settings.apiKeys;
+
         const settingsData = {
             user_id: user.id,
             max_word_count: settings.maxWordCount,
@@ -473,7 +552,7 @@ async function saveUserSettings(settings) {
             default_target_language: settings.defaultTargetLanguage,
             layout_mode: settings.layoutMode,
             enabled_providers: settings.enabledProviders,
-            api_keys: settings.apiKeys,
+            api_keys: encryptedKeys,
             updated_at: new Date().toISOString()
         };
         
@@ -493,7 +572,7 @@ async function saveUserSettings(settings) {
     }
 }
 
-async function loadUserSettings() {
+async function loadUserSettings(password = null) {
     if (isInLocalMode()) {
         return { data: null, error: null };
     }
@@ -516,7 +595,18 @@ async function loadUserSettings() {
             return { error: error.message };
         }
         
-        return { data, error: null };
+        let decryptionFailed = false;
+        if (data && data.api_keys && typeof data.api_keys === 'string') {
+            const decrypted = await decryptApiKeys(data.api_keys, password);
+            if (decrypted) {
+                data.api_keys = decrypted;
+            } else {
+                data.api_keys = {};
+                decryptionFailed = true;
+            }
+        }
+
+        return { data, error: null, decryptionFailed };
     } catch (err) {
         console.error('Load settings exception:', err);
         return { error: 'Failed to load settings' };
@@ -647,6 +737,7 @@ window.SupabaseAuth = {
     verifyEmailOtp,
     saveUserSettings,
     loadUserSettings,
+    resetPassword,
     saveUserProfile,
     loadUserProfiles,
     deleteUserProfile
