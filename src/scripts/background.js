@@ -261,6 +261,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         
         return true; // Keep message channel open for async response
     }
+
+    // Broadcast updated settings to all tabs
+    if (request.action === "updateSettings") {
+        (async () => {
+            try {
+                const tabs = await chrome.tabs.query({});
+                for (const tab of tabs) {
+                    await safelyMessageTab(tab.id, {
+                        action: "updateSettings",
+                        settings: request.settings
+                    });
+                }
+                sendResponse({ success: true });
+            } catch (error) {
+                console.error('Settings broadcast error:', error);
+                sendResponse({ success: false });
+            }
+        })();
+        return true;
+    }
     
     return true;
 });

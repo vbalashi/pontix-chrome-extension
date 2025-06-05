@@ -694,8 +694,12 @@ if (window.translatorExtensionLoaded) {
         }
         
         const margin = layoutMode === "shift" ? `${SIDEBAR_WIDTH}px` : "20px";
-        document.body.style.marginRight = margin;
-        document.body.style.transition = "margin-right 0.3s ease-in-out";
+        [document.documentElement, document.body].forEach((el) => {
+            if (el) {
+                el.style.marginRight = margin;
+                el.style.transition = "margin-right 0.3s ease-in-out";
+            }
+        });
         document.body.setAttribute('data-translator-layout-adjusted', 'true');
         
         console.log("📐 Page layout adjusted: minimal margin applied");
@@ -710,10 +714,14 @@ if (window.translatorExtensionLoaded) {
     function resetPageLayoutAdjustments() {
         console.log("🔄 Resetting page layout");
         
-        // Reset body margin and remove flag
+        // Reset margins on html and body and remove flag
         if (document.body.hasAttribute('data-translator-layout-adjusted')) {
-            document.body.style.marginRight = "";
-            document.body.style.transition = "";
+            [document.documentElement, document.body].forEach((el) => {
+                if (el) {
+                    el.style.marginRight = "";
+                    el.style.transition = "";
+                }
+            });
             document.body.removeAttribute('data-translator-layout-adjusted');
             console.log("📐 Reset body margin");
         }
