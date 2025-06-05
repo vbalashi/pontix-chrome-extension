@@ -461,6 +461,7 @@ async function saveUserSettings(settings) {
             max_word_count: settings.maxWordCount,
             debug_selection: settings.debugSelection,
             default_target_language: settings.defaultTargetLanguage,
+            layout_mode: settings.layoutMode,
             enabled_providers: settings.enabledProviders,
             api_keys: settings.apiKeys,
             updated_at: new Date().toISOString()
