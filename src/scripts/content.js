@@ -3,6 +3,9 @@ if (window.translatorExtensionLoaded) {
     console.log("Pontix content script already loaded, skipping");
 } else {
     window.translatorExtensionLoaded = true;
+
+    // Detect if running inside an iframe
+    const isIframe = window.self !== window.top;
     
     // Version identification for debugging
     console.log("🔄 Pontix v4.0 - Configurable Word Limits Loaded");
@@ -894,7 +897,9 @@ if (window.translatorExtensionLoaded) {
                 isEdgeImmersiveMode = checkEdgeImmersiveMode();
             }
             
-            handleSidebarToggle();
+            if (!isIframe) {
+                handleSidebarToggle();
+            }
             
             // Send a response to let the background script know the message was received
             sendResponse({ success: true });
@@ -1349,6 +1354,19 @@ if (window.translatorExtensionLoaded) {
         // Store for potential later use
         currentWord = word;
         currentSentence = sentence;
+
+        // If running inside an iframe, relay selection to the top frame
+        if (isIframe) {
+            window.top.postMessage({
+                source: 'pontix-frame',
+                text: word,
+                sentence: sentence
+            }, '*');
+
+            lastProcessedSelection = selectedText;
+            window.lastProcessingTime = now;
+            return;
+        }
         
         // Create sidebar if it doesn't exist
         let needsCreation = true;
@@ -1731,6 +1749,42 @@ if (window.translatorExtensionLoaded) {
             }
         }
     });
+
+    // When acting as the top frame, receive selections from child frames
+    if (!isIframe) {
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.source === 'pontix-frame') {
+                const { text, sentence } = event.data;
+                if (!sidebarEnabled) return;
+
+                let needsCreation = true;
+                if (document.getElementById("translator-sidebar")) {
+                    needsCreation = false;
+                } else if (document.getElementById("translator-sidebar-container")) {
+                    needsCreation = false;
+                }
+
+                if (needsCreation) {
+                    if (isEdgeImmersiveMode) {
+                        createImmersiveModeIframe();
+                    } else {
+                        createSidebar();
+                    }
+                    sidebarVisible = true;
+
+                    if (isEdgeImmersiveMode) {
+                        adjustPageForImmersiveMode();
+                    } else {
+                        adjustPageLayoutForReader();
+                    }
+                }
+
+                currentWord = text;
+                currentSentence = sentence;
+                updateSidebar(text, sentence, text);
+            }
+        });
+    }
 
     // Initialize on page load
     initializeExtension();

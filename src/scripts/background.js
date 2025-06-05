@@ -24,7 +24,7 @@ async function ensureContentScriptInjected(tabId) {
         
         try {
             await chrome.scripting.executeScript({
-                target: { tabId: tabId },
+                target: { tabId: tabId, allFrames: true },
                 files: ['content.js']
             });
             
