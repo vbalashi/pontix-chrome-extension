@@ -19,3 +19,4 @@ TESTING_GUIDE.md
 *.gz
 .cursor/
 TESTING_GUIDE.md
+supabase-client.js

@@ -141,8 +141,21 @@ CREATE TRIGGER update_user_settings_updated_at BEFORE UPDATE ON user_settings
 
 1. Go to Settings > API in your Supabase dashboard
 2. Copy the following values (you'll need them in the extension):
-   - Project URL
-   - Project API Key (anon/public key)
+ - Project URL
+ - Project API Key (anon/public key)
+
+### Configure build environment
+
+Export these credentials as environment variables before running the build
+script:
+
+```bash
+export SUPABASE_URL="https://your-project.supabase.co"
+export SUPABASE_ANON_KEY="your-anon-key"
+```
+
+The `npm run build` command will read these variables and generate
+`supabase-client.js` with the proper credentials.
 
 ## 5. Data Structure Explanation
 

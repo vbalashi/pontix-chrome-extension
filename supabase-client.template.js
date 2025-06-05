@@ -9,9 +9,8 @@
 const SUPABASE_CONFIG = {
     // ⚠️ SECURITY WARNING: Replace these with your actual Supabase project values
     // Get these from your Supabase dashboard: Settings > API
-    // ⚠️ DO NOT commit real credentials to version control
-    url: 'YOUR_SUPABASE_PROJECT_URL',
-    anonKey: 'YOUR_SUPABASE_ANON_KEY'
+    url: "__SUPABASE_URL__",
+    anonKey: "__SUPABASE_ANON_KEY__",
 };
 
 // ⚠️ IMPORTANT SECURITY NOTICE:

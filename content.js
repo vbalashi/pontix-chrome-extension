@@ -29,6 +29,7 @@ if (window.translatorExtensionLoaded) {
     let isSelecting = false;
     let isMouseDown = false;
     let selectionTimeout = null;
+    let layoutAdjusted = false;
     
     // Check if we're in Edge immersive reader mode
     function checkEdgeImmersiveMode() {
@@ -195,7 +196,7 @@ if (window.translatorExtensionLoaded) {
     
     // Enhanced observer for Angular content changes
     function setupAngularContentObserver() {
-        let layoutAdjusted = false; // Prevent infinite loop
+        let localLayoutAdjusted = false; // Prevent infinite loop
         let initialContentLoaded = false;
         let iframeMonitored = false;
         
@@ -248,9 +249,9 @@ if (window.translatorExtensionLoaded) {
                 }
             }
             
-            if (significantContentChanged && !layoutAdjusted) {
+            if (significantContentChanged && !localLayoutAdjusted) {
                 console.log("📖 Significant reader content detected, setting up extension");
-                layoutAdjusted = true;
+                localLayoutAdjusted = true;
                 
                 // Wait a bit for Angular to finish loading content
                 setTimeout(() => {
@@ -284,7 +285,7 @@ if (window.translatorExtensionLoaded) {
         setTimeout(() => {
             if (!initialContentLoaded) {
                 console.log("📚 Angular content loading timeout, enabling layout adjustments");
-                layoutAdjusted = false;
+                localLayoutAdjusted = false;
             }
         }, 10000);
     }

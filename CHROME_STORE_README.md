@@ -1,4 +1,4 @@
-# Chrome Pontix - Publishing Guide
+# Pontix Chrome – Publishing Guide
 
 ## 📦 Package Information
 
