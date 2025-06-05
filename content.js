@@ -1,11 +1,11 @@
 // Ensure script only runs once (for multiple injection cases)
 if (window.translatorExtensionLoaded) {
-    console.log("Translator extension content script already loaded, skipping");
+    console.log("Pontix content script already loaded, skipping");
 } else {
     window.translatorExtensionLoaded = true;
     
     // Version identification for debugging
-    console.log("🔄 Translator Extension v4.0 - Configurable Word Limits Loaded");
+    console.log("🔄 Pontix v4.0 - Configurable Word Limits Loaded");
     console.log("🐛 Debug mode enabled - selection events will be logged");
     console.log("⏰ New behavior: Waits for mouse release/keyboard completion before processing");
     console.log("📊 New feature: Configurable word count limits in settings");
@@ -860,6 +860,12 @@ if (window.translatorExtensionLoaded) {
     // Listen for messages from background script with improved error handling
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.log("Content script received message:", message);
+        
+        // Handle ping for content script detection
+        if (message.action === "ping") {
+            sendResponse({ pong: true });
+            return true;
+        }
         
         if (message.action === "toggleSidebar") {
             sidebarEnabled = message.enabled;

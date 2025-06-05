@@ -3145,83 +3145,51 @@ function translateWithGoogle(word, sentence, targetLang, boxElement) {
 
 // DeepL implementation
 function translateWithDeepL(word, sentence, targetLang, boxElement) {
+    console.log('🔍 DeepL translation started:', {
+        word: word,
+        sentence: sentence,
+        targetLang: targetLang,
+        hasApiKey: !!settings.apiKeys.deepl
+    });
+    
     const apiKey = settings.apiKeys.deepl;
     if (!apiKey) {
+        console.error('❌ DeepL API key missing');
         showTranslationError(boxElement, 'DeepL API key required');
         return;
     }
     
-    // Determine the correct endpoint based on API key
-    const isFreeKey = apiKey.endsWith(':fx');
-    const baseUrl = isFreeKey ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
-    const url = `${baseUrl}/v2/translate`;
+    console.log('🔄 Sending DeepL translation request to background script...');
     
-    fetch(url, {
-        method: 'POST',
-        headers: {
-            'Authorization': `DeepL-Auth-Key ${apiKey}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            text: [word],
-            target_lang: targetLang.toUpperCase()
-        })
+    // Send translation request to background script
+    chrome.runtime.sendMessage({
+        action: 'translate',
+        provider: 'deepl',
+        word: word,
+        sentence: sentence,
+        targetLang: targetLang,
+        apiKey: apiKey
     })
-        .then(response => response.json())
-        .then(data => {
-            if (data.translations && data.translations[0]) {
-                const translation = data.translations[0].text;
-                const contentElement = boxElement.querySelector('.translation-content');
-                if (contentElement) {
-                    contentElement.innerHTML = `<div class="translation-text">${translation}</div>`;
-                }
-            } else {
-                showTranslationError(boxElement, 'No translation found');
+    .then(result => {
+        console.log('📨 DeepL response received:', result);
+        if (result.success) {
+            const contentElement = boxElement.querySelector('.translation-content');
+            if (contentElement) {
+                contentElement.innerHTML = `<div class="translation-text">${result.translation}</div>`;
             }
-        })
-        .catch(error => {
-            console.error('DeepL error:', error);
-            showTranslationError(boxElement, 'Translation failed');
-        });
+        } else {
+            console.error('❌ DeepL translation failed:', result.error);
+            showTranslationError(boxElement, result.error || 'Translation failed');
+        }
+    })
+    .catch(error => {
+        console.error('❌ DeepL promise chain error:', error);
+        showTranslationError(boxElement, 'Translation failed');
+    });
 }
 
 // Microsoft Translator implementation
-function translateWithMicrosoft(word, sentence, targetLang, boxElement) {
-    const apiKey = settings.apiKeys.microsoft;
-    if (!apiKey) {
-        showTranslationError(boxElement, 'Microsoft API key required');
-        return;
-    }
-    
-    const url = 'https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=' + targetLang;
-    
-    fetch(url, {
-        method: 'POST',
-        headers: {
-            'Ocp-Apim-Subscription-Key': apiKey,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify([{ text: word }])
-    })
-        .then(response => response.json())
-        .then(data => {
-            if (data && data[0] && data[0].translations && data[0].translations[0]) {
-                const translation = data[0].translations[0].text;
-                const contentElement = boxElement.querySelector('.translation-content');
-                if (contentElement) {
-                    contentElement.innerHTML = `<div class="translation-text">${translation}</div>`;
-                }
-            } else {
-                showTranslationError(boxElement, 'No translation found');
-            }
-        })
-        .catch(error => {
-            console.error('Microsoft Translator error:', error);
-            showTranslationError(boxElement, 'Translation failed');
-        });
-}
-
-// Yandex Translate implementation
+// Yandex Translate implementation (keep direct call for now as it might work)
 function translateWithYandex(word, sentence, targetLang, boxElement) {
     const apiKey = settings.apiKeys.yandex;
     if (!apiKey) {
@@ -3268,50 +3236,30 @@ function translateWithOpenAI(word, sentence, targetLang, boxElement) {
     const availableModels = dynamicData.availableModels.openai || ['gpt-3.5-turbo'];
     const model = modelSelect ? modelSelect.value : availableModels[0];
     
-    // Use global languageNames instead of hardcoded short list
-    const targetLanguageName = languageNames[targetLang] || targetLang;
-    
-    let prompt;
-    if (sentence && sentence.trim() && sentence !== word) {
-        prompt = `Translate the word "${word}" to ${targetLanguageName}. Context sentence: "${sentence}". Provide only the translation, no explanations.`;
-    } else {
-        prompt = `Translate "${word}" to ${targetLanguageName}. Provide only the translation, no explanations.`;
-    }
-    
-    fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            model: model,
-            messages: [
-                {
-                    role: 'user',
-                    content: prompt
-                }
-            ],
-            max_tokens: 100,
-            temperature: 0.3
-        })
+    // Send translation request to background script
+    chrome.runtime.sendMessage({
+        action: 'translate',
+        provider: 'openai',
+        word: word,
+        sentence: sentence,
+        targetLang: targetLang,
+        apiKey: apiKey,
+        model: model
     })
-        .then(response => response.json())
-        .then(data => {
-            if (data.choices && data.choices[0] && data.choices[0].message) {
-                const translation = data.choices[0].message.content.trim();
-                const contentElement = boxElement.querySelector('.translation-content');
-                if (contentElement) {
-                    contentElement.innerHTML = `<div class="translation-text">${translation}</div>`;
-                }
-            } else {
-                showTranslationError(boxElement, 'No translation found');
+    .then(result => {
+        if (result.success) {
+            const contentElement = boxElement.querySelector('.translation-content');
+            if (contentElement) {
+                contentElement.innerHTML = `<div class="translation-text">${result.translation}</div>`;
             }
-        })
-        .catch(error => {
-            console.error('OpenAI error:', error);
-            showTranslationError(boxElement, 'Translation failed');
-        });
+        } else {
+            showTranslationError(boxElement, result.error || 'Translation failed');
+        }
+    })
+    .catch(error => {
+        console.error('OpenAI error:', error);
+        showTranslationError(boxElement, 'Translation failed');
+    });
 }
 
 // Claude implementation

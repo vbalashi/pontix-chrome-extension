@@ -8,6 +8,16 @@
     "storage",
     "scripting"
   ],
+  "host_permissions": [
+    "https://translate.googleapis.com/*",
+    "https://api.deepl.com/*",
+    "https://api-free.deepl.com/*",
+    "https://api.cognitive.microsofttranslator.com/*",
+    "https://translate.yandex.net/*",
+    "https://api.openai.com/*",
+    "https://api.anthropic.com/*",
+    "https://generativelanguage.googleapis.com/*"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -25,19 +35,6 @@
     "48": "icons/pontix_icon_48.png",
     "128": "icons/pontix_icon_128.png"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "http://*/*",
-        "https://*/*"
-      ],
-      "js": [
-        "content.js"
-      ],
-      "run_at": "document_idle",
-      "all_frames": true
-    }
-  ],
   "web_accessible_resources": [
     {
       "resources": [
@@ -48,8 +45,7 @@
         "supabase.js"
       ],
       "matches": [
-        "http://*/*",
-        "https://*/*"
+        "<all_urls>"
       ]
     }
   ]

@@ -7,11 +7,20 @@
 
 // Supabase configuration
 const SUPABASE_CONFIG = {
-    // Replace these with your actual Supabase project values
+    // ⚠️ SECURITY WARNING: Replace these with your actual Supabase project values
     // Get these from your Supabase dashboard: Settings > API
-    url: 'https://iyfwymlzdwtqruibeujc.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5Znd5bWx6ZHd0cXJ1aWJldWpjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg4ODcyNzYsImV4cCI6MjA2NDQ2MzI3Nn0.Cb1ouxrsNwr52jPH2F-DdbLzymlEiG4uXtnb5VVqlEg'
+    // ⚠️ DO NOT commit real credentials to version control
+    url: 'YOUR_SUPABASE_PROJECT_URL',
+    anonKey: 'YOUR_SUPABASE_ANON_KEY'
 };
+
+// ⚠️ IMPORTANT SECURITY NOTICE:
+// The credentials above have been removed for security reasons.
+// To use this extension:
+// 1. Go to your Supabase dashboard: Settings > API
+// 2. Copy your Project URL and anon/public key
+// 3. Replace the placeholder values above
+// 4. NEVER commit real credentials to version control
 
 // ✅ Configuration completed with your Supabase project credentials
 
