@@ -693,41 +693,249 @@ if (window.translatorExtensionLoaded) {
             return;
         }
         
-        const margin = layoutMode === "shift" ? `${SIDEBAR_WIDTH}px` : "20px";
-        [document.documentElement, document.body].forEach((el) => {
-            if (el) {
-                el.style.marginRight = margin;
-                el.style.transition = "margin-right 0.3s ease-in-out";
+        if (layoutMode !== "shift") {
+            console.log("📐 Layout mode is not 'shift', skipping page adjustment");
+            document.body.setAttribute('data-translator-layout-adjusted', 'true');
+            return;
+        }
+
+        console.log("📐 Applying 'shift' layout mode");
+        
+        try {
+            // Site-specific layout adjustments with conservative approach
+            const hostname = window.location.hostname;
+            const url = window.location.href;
+            
+            // Google Books specific adjustments - focus on main page containers only
+            if (hostname.includes('play.google.com') && url.includes('/books/')) {
+                adjustGoogleBooksLayout();
+            }
+            // EPUB reader specific adjustments - very conservative
+            else if (hostname.includes('nubereader') || hostname.includes('epub')) {
+                adjustEpubReaderLayout();
+            }
+            // General fallback adjustments
+            else {
+                adjustGeneralLayout();
+            }
+
+            document.body.setAttribute('data-translator-layout-adjusted', 'true');
+            layoutAdjusted = true;
+            console.log("📐 Page layout adjustment completed");
+        } catch (error) {
+            console.error("❌ Error during layout adjustment:", error);
+            // Fallback to simple body margin adjustment
+            adjustGeneralLayout();
+            document.body.setAttribute('data-translator-layout-adjusted', 'true');
+            layoutAdjusted = true;
+        }
+    }
+
+    function adjustGoogleBooksLayout() {
+        console.log("📚 Applying Google Books specific layout adjustments");
+        
+        // For Google Books, we can only adjust the main page containers
+        // The actual book content is in a cross-origin iframe we can't access
+        
+        // Very conservative approach - only adjust obvious main containers
+        const safeSelectors = [
+            'body > div:first-child', // Main app container
+            '[role="main"]',
+            'main'
+        ];
+        
+        let adjusted = false;
+        
+        safeSelectors.forEach(selector => {
+            try {
+                const elements = document.querySelectorAll(selector);
+                elements.forEach(element => {
+                    if (element && !element.hasAttribute('data-translator-shifted') && 
+                        element !== document.body && element !== document.documentElement) {
+                        
+                        // Only adjust if this element is a major layout container
+                        const rect = element.getBoundingClientRect();
+                        if (rect.width > window.innerWidth * 0.8) {
+                            console.log(`📚 Adjusting Google Books container: ${selector}`);
+                            
+                            // Store original styles
+                            const originalMarginRight = element.style.marginRight;
+                            element.setAttribute('data-translator-original-margin-right', originalMarginRight);
+                            
+                            // Apply conservative shift adjustment
+                            element.style.marginRight = `${SIDEBAR_WIDTH}px`;
+                            element.style.transition = "margin-right 0.3s ease-in-out";
+                            element.setAttribute('data-translator-shifted', 'true');
+                            adjusted = true;
+                        }
+                    }
+                });
+            } catch (error) {
+                console.warn(`📚 Error adjusting Google Books container ${selector}:`, error);
             }
         });
-        document.body.setAttribute('data-translator-layout-adjusted', 'true');
         
-        console.log("📐 Page layout adjusted: minimal margin applied");
+        // Always apply general layout as well for body/html
+        adjustGeneralLayout();
+    }
+
+    function adjustEpubReaderLayout() {
+        console.log("📖 Applying EPUB reader specific layout adjustments");
         
-        // Don't adjust individual containers - let them use natural width
-        // The sidebar will overlay on top with high z-index
+        // Very conservative approach for EPUB readers to avoid breaking functionality
+        try {
+            // Only adjust the body and html - don't touch Angular containers
+            adjustGeneralLayout();
+            
+            // Optionally try to adjust very safe containers that are clearly layout-only
+            const veryConservativeSelectors = [
+                '.reader-wrapper',
+                '.book-wrapper', 
+                '.content-wrapper'
+            ];
+            
+            veryConservativeSelectors.forEach(selector => {
+                try {
+                    const elements = document.querySelectorAll(selector);
+                    elements.forEach(element => {
+                        if (element && !element.hasAttribute('data-translator-shifted') && 
+                            !element.hasAttribute('ng-view') && // Don't touch Angular view containers
+                            !element.hasAttribute('ui-view') && // Don't touch UI-Router containers
+                            element.tagName !== 'SCRIPT' &&
+                            element.tagName !== 'STYLE') {
+                            
+                            const rect = element.getBoundingClientRect();
+                            if (rect.width > window.innerWidth * 0.9) {
+                                console.log(`📖 Adjusting safe EPUB container: ${selector}`);
+                                
+                                const originalMarginRight = element.style.marginRight;
+                                element.setAttribute('data-translator-original-margin-right', originalMarginRight);
+                                
+                                element.style.marginRight = `${SIDEBAR_WIDTH}px`;
+                                element.style.transition = "margin-right 0.3s ease-in-out";
+                                element.setAttribute('data-translator-shifted', 'true');
+                            }
+                        }
+                    });
+                } catch (error) {
+                    console.warn(`📖 Error adjusting EPUB container ${selector}:`, error);
+                }
+            });
+        } catch (error) {
+            console.error("📖 Error in EPUB reader layout adjustment:", error);
+            // Fall back to just body/html adjustment
+            adjustGeneralLayout();
+        }
+    }
+
+    function adjustGeneralLayout() {
+        console.log("📐 Applying general layout adjustments");
         
-        layoutAdjusted = true;
+        try {
+            // Apply margin to body and html elements - this is the safest approach
+            const margin = `${SIDEBAR_WIDTH}px`;
+            [document.documentElement, document.body].forEach((el) => {
+                if (el && !el.hasAttribute('data-translator-shifted')) {
+                    // Store original styles
+                    const originalMarginRight = el.style.marginRight;
+                    el.setAttribute('data-translator-original-margin-right', originalMarginRight);
+                    
+                    // Apply shift
+                    el.style.marginRight = margin;
+                    el.style.transition = "margin-right 0.3s ease-in-out";
+                    el.setAttribute('data-translator-shifted', 'true');
+                }
+            });
+            
+            // Very conservative container adjustments - only touch obvious layout containers
+            const safeGeneralSelectors = [
+                'body > div:first-child:not([ng-view]):not([ui-view])', // Main app container, but not Angular views
+                'body > main',
+                'body > .container:first-child',
+                'body > .wrapper:first-child'
+            ];
+            
+            safeGeneralSelectors.forEach(selector => {
+                try {
+                    const elements = document.querySelectorAll(selector);
+                    elements.forEach(element => {
+                        if (element && !element.hasAttribute('data-translator-shifted') && 
+                            element !== document.body && element !== document.documentElement &&
+                            !element.hasAttribute('ng-app') && // Don't touch Angular app containers
+                            !element.hasAttribute('ng-view') && // Don't touch Angular view containers
+                            !element.hasAttribute('ui-view')) { // Don't touch UI-Router containers
+                            
+                            // Only adjust if this element takes up most of the viewport
+                            const rect = element.getBoundingClientRect();
+                            if (rect.width > window.innerWidth * 0.85) {
+                                console.log(`📐 Adjusting safe general container: ${selector}`);
+                                
+                                // Store original styles
+                                const originalMarginRight = element.style.marginRight;
+                                element.setAttribute('data-translator-original-margin-right', originalMarginRight);
+                                
+                                // Apply shift adjustments
+                                element.style.marginRight = `${SIDEBAR_WIDTH}px`;
+                                element.style.transition = "margin-right 0.3s ease-in-out";
+                                element.setAttribute('data-translator-shifted', 'true');
+                            }
+                        }
+                    });
+                } catch (error) {
+                    console.warn(`📐 Error adjusting general container ${selector}:`, error);
+                }
+            });
+        } catch (error) {
+            console.error("📐 Error in general layout adjustment:", error);
+        }
     }
     
     // Reset page layout adjustments
     function resetPageLayoutAdjustments() {
         console.log("🔄 Resetting page layout");
         
-        // Reset margins on html and body and remove flag
-        if (document.body.hasAttribute('data-translator-layout-adjusted')) {
-            [document.documentElement, document.body].forEach((el) => {
-                if (el) {
-                    el.style.marginRight = "";
-                    el.style.transition = "";
+        try {
+            // Reset all elements that were shifted
+            const shiftedElements = document.querySelectorAll('[data-translator-shifted="true"]');
+            console.log(`🔄 Found ${shiftedElements.length} shifted elements to reset`);
+            
+            shiftedElements.forEach((element, index) => {
+                try {
+                    console.log(`🔄 Resetting element ${index}:`, element.tagName, element.className || element.id);
+                    
+                    // Restore original margin-right style
+                    const originalMarginRight = element.getAttribute('data-translator-original-margin-right');
+                    
+                    if (originalMarginRight !== null) {
+                        element.style.marginRight = originalMarginRight;
+                        element.removeAttribute('data-translator-original-margin-right');
+                    } else {
+                        element.style.marginRight = "";
+                    }
+                    
+                    // Remove transition and shift marker
+                    element.style.transition = "";
+                    element.removeAttribute('data-translator-shifted');
+                } catch (error) {
+                    console.warn(`🔄 Error resetting element ${index}:`, error);
                 }
             });
-            document.body.removeAttribute('data-translator-layout-adjusted');
-            console.log("📐 Reset body margin");
+            
+            // Remove layout adjusted flag
+            if (document.body.hasAttribute('data-translator-layout-adjusted')) {
+                document.body.removeAttribute('data-translator-layout-adjusted');
+            }
+            
+            layoutAdjusted = false;
+            console.log("✅ Page layout reset completed");
+        } catch (error) {
+            console.error("❌ Error during layout reset:", error);
+            // Force cleanup
+            layoutAdjusted = false;
+            if (document.body.hasAttribute('data-translator-layout-adjusted')) {
+                document.body.removeAttribute('data-translator-layout-adjusted');
+            }
         }
-        
-        layoutAdjusted = false;
-        console.log("✅ Page layout reset completed");
     }
     
     // Setup selection event handlers
