@@ -40,6 +40,8 @@ CREATE TABLE user_settings (
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE UNIQUE,
     max_word_count INTEGER DEFAULT 25,
     default_target_language VARCHAR(10) DEFAULT 'ru',
+    layout_mode VARCHAR(20) DEFAULT 'overlay',
+    debug_selection BOOLEAN DEFAULT false,
     enabled_providers JSONB DEFAULT '{}',
     api_keys JSONB DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -163,6 +165,8 @@ The `npm run build` command will read these variables and generate
 - Stores global settings that apply across all profiles
 - max_word_count: Maximum words to translate
 - default_target_language: Default language code
+- layout_mode: Sidebar layout mode (`overlay` or `shift`)
+- debug_selection: Show selection debugging info (true/false)
 - enabled_providers: JSON object of provider enable/disable states
 - api_keys: JSON object storing API keys (encrypted)
 
