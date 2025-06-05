@@ -308,34 +308,7 @@ async function signIn(email, password) {
     }
 }
 
-// New function to handle email verification with OTP
-async function verifyEmailOtp(email, token) {
-    if (isInLocalMode()) {
-        return { error: 'Cloud sync not available. Extension running in local mode.' };
-    }
-    
-    const client = getSupabaseClient();
-    if (!client) return { error: 'Supabase client not available' };
-    
-    try {
-        const { data, error } = await client.auth.verifyOtp({
-            email: email,
-            token: token,
-            type: 'email'
-        });
-        
-        if (error) {
-            console.error('Email verification error:', error);
-            return { error: error.message };
-        }
-        
-        console.log('Email verification successful:', data);
-        return { data, error: null };
-    } catch (err) {
-        console.error('Email verification exception:', err);
-        return { error: 'Email verification failed' };
-    }
-}
+
 
 // Alternative sign up with OTP (recommended for Chrome extensions)
 async function signUpWithOtp(email) {
@@ -407,11 +380,17 @@ async function verifyOtp(email, token, type = 'email') {
     if (!client) return { error: 'Supabase client not available' };
     
     try {
-        const { data, error } = await client.auth.verifyOtp({
+        console.log('🔐 verifyOtp called with:', { email, token: token?.substring(0, 3) + '***', type });
+        
+        // Try the exact format from Supabase docs
+        const otpPayload = {
             email: email,
             token: token,
             type: type
-        });
+        };
+        console.log('🔐 Sending to Supabase:', JSON.stringify(otpPayload, null, 2));
+        
+        const { data, error } = await client.auth.verifyOtp(otpPayload);
         
         if (error) {
             console.error('OTP verification error:', error);
@@ -543,14 +522,35 @@ async function saveUserSettings(settings, password = null) {
         const { data: { user } } = await client.auth.getUser();
         if (!user) return { error: 'User not authenticated' };
         
-        const encryptedKeys = password ? await encryptApiKeys(settings.apiKeys || {}, password) : settings.apiKeys;
+        console.log('🔐 saveUserSettings - password available:', !!password);
+        console.log('🔐 saveUserSettings - apiKeys providers:', Object.keys(settings.apiKeys || {}));
+        
+        // Check if we have API keys that need encryption
+        const hasApiKeys = Object.values(settings.apiKeys || {}).some(key => key && key.trim() !== '');
+        
+        let encryptedKeys;
+        if (hasApiKeys) {
+            if (!password) {
+                // SECURITY: Never store API keys without encryption
+                console.error('🔐 SECURITY: Attempted to store API keys without password - BLOCKING');
+                return { error: 'Password required for API key encryption. API keys cannot be stored without encryption.' };
+            }
+            encryptedKeys = await encryptApiKeys(settings.apiKeys || {}, password);
+            if (!encryptedKeys) {
+                return { error: 'Failed to encrypt API keys' };
+            }
+            console.log('🔐 saveUserSettings - API keys encrypted successfully');
+        } else {
+            // No API keys to store, can save empty object
+            encryptedKeys = {};
+            console.log('🔐 saveUserSettings - No API keys to store');
+        }
+        
+        console.log('🔐 saveUserSettings - encryptedKeys type:', typeof encryptedKeys);
 
+        // REFACTORED: Only store global settings (API keys and enabled providers)
         const settingsData = {
             user_id: user.id,
-            max_word_count: settings.maxWordCount,
-            debug_selection: settings.debugSelection,
-            default_target_language: settings.defaultTargetLanguage,
-            layout_mode: settings.layoutMode,
             enabled_providers: settings.enabledProviders,
             api_keys: encryptedKeys,
             updated_at: new Date().toISOString()
@@ -590,30 +590,64 @@ async function loadUserSettings(password = null) {
             .eq('user_id', user.id)
             .single();
         
-        if (error && error.code !== 'PGRST116') { // PGRST116 is "not found"
-            console.error('Load settings error:', error);
-            return { error: error.message };
+        // Handle cases where no settings exist yet for new users
+        if (error) {
+            if (error.code === 'PGRST116') {
+                // PGRST116 is "not found" - normal for new users
+                console.log('🔄 No user settings found (new user) - this is normal');
+                return { data: null, error: null };
+            } else if (error.message && error.message.includes('406')) {
+                // 406 errors can also occur with .single() when no data exists
+                console.log('🔄 No user settings found (406 error with .single()) - this is normal for new users');
+                return { data: null, error: null };
+            } else {
+                // Other errors are actual problems
+                console.error('Load settings error:', error);
+                return { error: error.message };
+            }
         }
         
         let decryptionFailed = false;
-        if (data && data.api_keys && typeof data.api_keys === 'string') {
-            const decrypted = await decryptApiKeys(data.api_keys, password);
-            if (decrypted) {
-                data.api_keys = decrypted;
-            } else {
-                data.api_keys = {};
-                decryptionFailed = true;
+        let plaintextKeysDetected = false;
+        
+        if (data && data.api_keys) {
+            if (typeof data.api_keys === 'string') {
+                // Encrypted API keys (expected format)
+                const decrypted = await decryptApiKeys(data.api_keys, password);
+                if (decrypted) {
+                    data.api_keys = decrypted;
+                    console.log('🔐 Successfully decrypted API keys from cloud');
+                } else {
+                    console.error('🔐 Failed to decrypt API keys - clearing them for security');
+                    data.api_keys = {};
+                    decryptionFailed = true;
+                }
+            } else if (typeof data.api_keys === 'object') {
+                // SECURITY ISSUE: Plain text API keys detected in database
+                console.error('🚨 SECURITY ALERT: Plain text API keys detected in database!');
+                console.error('🚨 This should never happen with the new security measures.');
+                
+                // Check if these are actually API keys (non-empty values)
+                const hasActualKeys = Object.values(data.api_keys).some(key => key && key.trim() !== '');
+                if (hasActualKeys) {
+                    console.error('🚨 Blocking load of plain text API keys for security');
+                    plaintextKeysDetected = true;
+                    data.api_keys = {}; // Clear for security
+                } else {
+                    // Empty object is fine
+                    console.log('🔐 Empty API keys object loaded (no encryption needed)');
+                }
             }
         }
 
-        return { data, error: null, decryptionFailed };
+        return { data, error: null, decryptionFailed, plaintextKeysDetected };
     } catch (err) {
         console.error('Load settings exception:', err);
         return { error: 'Failed to load settings' };
     }
 }
 
-async function saveUserProfile(profileName, profileSettings, isCurrent = false) {
+async function saveUserProfile(profileName, profileSettings, isCurrent = false, password = null) {
     if (isInLocalMode()) {
         console.log('📱 Local mode: Profile saved locally only');
         return { data: null, error: null };
@@ -634,10 +668,18 @@ async function saveUserProfile(profileName, profileSettings, isCurrent = false) 
                 .eq('user_id', user.id);
         }
         
+        // REFACTORED: Profiles no longer store API keys (they're global now)
+        // Remove any API keys from profile settings for security
+        let processedSettings = { ...profileSettings };
+        delete processedSettings.apiKeys;
+        delete processedSettings.enabledProviders;
+        
+        console.log('🔐 Saving profile-specific settings only for:', profileName);
+        
         const profileData = {
             user_id: user.id,
             profile_name: profileName,
-            settings: profileSettings,
+            settings: processedSettings,
             is_current: isCurrent,
             updated_at: new Date().toISOString()
         };
@@ -658,7 +700,7 @@ async function saveUserProfile(profileName, profileSettings, isCurrent = false) 
     }
 }
 
-async function loadUserProfiles() {
+async function loadUserProfiles(password = null) {
     if (isInLocalMode()) {
         return { data: [], error: null };
     }
@@ -679,6 +721,21 @@ async function loadUserProfiles() {
         if (error) {
             console.error('Load profiles error:', error);
             return { error: error.message };
+        }
+        
+        // REFACTORED: Profiles no longer store API keys, so no decryption needed
+        // Just clean up any legacy API keys that might exist
+        if (data) {
+            for (let profile of data) {
+                if (profile.settings?.apiKeys) {
+                    console.log('🔐 Removing legacy API keys from profile:', profile.profile_name);
+                    delete profile.settings.apiKeys;
+                }
+                if (profile.settings?.enabledProviders) {
+                    console.log('🔐 Removing legacy enabled providers from profile:', profile.profile_name);
+                    delete profile.settings.enabledProviders;
+                }
+            }
         }
         
         return { data: data || [], error: null };
@@ -719,6 +776,250 @@ async function deleteUserProfile(profileName) {
     }
 }
 
+// Security audit function to check for plain text API keys
+async function auditDatabaseSecurity() {
+    if (isInLocalMode()) {
+        return { 
+            error: null, 
+            message: 'Local mode - no database audit needed',
+            issues: [],
+            summary: {
+                total_locations_checked: 0,
+                encrypted_locations: 0,
+                plaintext_locations: 0,
+                empty_locations: 0
+            }
+        };
+    }
+    
+    const client = getSupabaseClient();
+    if (!client) return { error: 'Supabase client not available', issues: [] };
+    
+    try {
+        const { data: { user } } = await client.auth.getUser();
+        if (!user) return { error: 'User not authenticated', issues: [] };
+        
+        const issues = [];
+        const summary = {
+            total_locations_checked: 0,
+            encrypted_locations: 0,
+            plaintext_locations: 0,
+            empty_locations: 0
+        };
+        
+        console.log('🔍 Starting security audit for user:', user.email);
+        
+        // Check user settings for plain text API keys
+        console.log('🔍 Auditing user settings...');
+        summary.total_locations_checked++;
+        
+        const { data: settingsData, error: settingsError } = await client
+            .from('user_settings')
+            .select('api_keys')
+            .eq('user_id', user.id)
+            .single();
+        
+        // Handle cases where no settings exist yet (normal for new users)
+        if (settingsError && 
+            (settingsError.code === 'PGRST116' || 
+             (settingsError.message && settingsError.message.includes('406')))) {
+            // No settings found - this is normal for new users
+            summary.empty_locations++;
+            console.log('ℹ️ User settings: No settings found (new user)');
+        } else if (settingsError) {
+            // Other errors are actual problems
+            console.error('🔍 Audit error for user settings:', settingsError);
+            summary.empty_locations++;
+        } else if (settingsData?.api_keys) {
+            if (typeof settingsData.api_keys === 'string') {
+                // Encrypted (good)
+                summary.encrypted_locations++;
+                console.log('✅ User settings: API keys are encrypted');
+            } else if (typeof settingsData.api_keys === 'object') {
+                const hasPlaintextKeys = Object.values(settingsData.api_keys).some(key => key && key.trim() !== '');
+                if (hasPlaintextKeys) {
+                    summary.plaintext_locations++;
+                    issues.push({
+                        type: 'user_settings',
+                        severity: 'critical',
+                        description: 'Plain text API keys found in user settings',
+                        affected_providers: Object.keys(settingsData.api_keys).filter(k => settingsData.api_keys[k] && settingsData.api_keys[k].trim() !== '')
+                    });
+                    console.error('🚨 User settings: Found plain text API keys for providers:', Object.keys(settingsData.api_keys).filter(k => settingsData.api_keys[k] && settingsData.api_keys[k].trim() !== ''));
+                } else {
+                    summary.empty_locations++;
+                    console.log('ℹ️ User settings: API keys object is empty');
+                }
+            }
+        } else {
+            summary.empty_locations++;
+            console.log('ℹ️ User settings: No API keys found');
+        }
+        
+        // Check profiles for plain text API keys
+        console.log('🔍 Auditing user profiles...');
+        const { data: profilesData, error: profilesError } = await client
+            .from('user_profiles')
+            .select('profile_name, settings')
+            .eq('user_id', user.id);
+        
+        if (!profilesError && profilesData) {
+            for (const profile of profilesData) {
+                summary.total_locations_checked++;
+                console.log(`🔍 Auditing profile: ${profile.profile_name}`);
+                
+                if (profile.settings?.apiKeys) {
+                    if (typeof profile.settings.apiKeys === 'string') {
+                        // Encrypted (good)
+                        summary.encrypted_locations++;
+                        console.log(`✅ Profile ${profile.profile_name}: API keys are encrypted`);
+                    } else if (typeof profile.settings.apiKeys === 'object') {
+                        const hasPlaintextKeys = Object.values(profile.settings.apiKeys).some(key => key && key.trim() !== '');
+                        if (hasPlaintextKeys) {
+                            summary.plaintext_locations++;
+                            issues.push({
+                                type: 'profile',
+                                profile_name: profile.profile_name,
+                                severity: 'critical',
+                                description: `Plain text API keys found in profile: ${profile.profile_name}`,
+                                affected_providers: Object.keys(profile.settings.apiKeys).filter(k => profile.settings.apiKeys[k] && profile.settings.apiKeys[k].trim() !== '')
+                            });
+                            console.error(`🚨 Profile ${profile.profile_name}: Found plain text API keys for providers:`, Object.keys(profile.settings.apiKeys).filter(k => profile.settings.apiKeys[k] && profile.settings.apiKeys[k].trim() !== ''));
+                        } else {
+                            summary.empty_locations++;
+                            console.log(`ℹ️ Profile ${profile.profile_name}: API keys object is empty`);
+                        }
+                    }
+                } else {
+                    summary.empty_locations++;
+                    console.log(`ℹ️ Profile ${profile.profile_name}: No API keys found`);
+                }
+            }
+        }
+        
+        // Log audit summary
+        console.log('🔍 Security audit complete:', {
+            total_issues: issues.length,
+            summary: summary
+        });
+        
+        return {
+            error: null,
+            message: issues.length === 0 ? 'No security issues found' : `Found ${issues.length} security issue(s)`,
+            issues: issues,
+            summary: summary
+        };
+        
+    } catch (err) {
+        console.error('🚨 Security audit error:', err);
+        return { error: 'Failed to perform security audit', issues: [] };
+    }
+}
+
+// Security cleanup function to remove all plain text API keys
+async function cleanupPlaintextApiKeys() {
+    if (isInLocalMode()) {
+        return { 
+            error: null, 
+            message: 'Local mode - no cleanup needed',
+            cleanedCount: 0,
+            details: []
+        };
+    }
+    
+    const client = getSupabaseClient();
+    if (!client) return { error: 'Supabase client not available' };
+    
+    try {
+        const { data: { user } } = await client.auth.getUser();
+        if (!user) return { error: 'User not authenticated' };
+        
+        let cleanedCount = 0;
+        const details = [];
+        
+        console.log('🧹 Starting security cleanup for user:', user.email);
+        
+        // Clean user settings
+        console.log('🧹 Checking user settings for cleanup...');
+        const { data: settingsData, error: settingsError } = await client
+            .from('user_settings')
+            .select('api_keys')
+            .eq('user_id', user.id)
+            .single();
+        
+        if (!settingsError && settingsData?.api_keys && typeof settingsData.api_keys === 'object') {
+            const plaintextProviders = Object.keys(settingsData.api_keys).filter(k => settingsData.api_keys[k] && settingsData.api_keys[k].trim() !== '');
+            if (plaintextProviders.length > 0) {
+                await client
+                    .from('user_settings')
+                    .update({ api_keys: {} })
+                    .eq('user_id', user.id);
+                cleanedCount++;
+                details.push({
+                    location: 'user_settings',
+                    providers_cleaned: plaintextProviders
+                });
+                console.log('🧹 Cleaned plain text API keys from user settings for providers:', plaintextProviders);
+            } else {
+                console.log('ℹ️ User settings: No plain text API keys to clean');
+            }
+        } else {
+            console.log('ℹ️ User settings: No API keys object found or already encrypted');
+        }
+        
+        // Clean profiles
+        console.log('🧹 Checking profiles for cleanup...');
+        const { data: profilesData, error: profilesError } = await client
+            .from('user_profiles')
+            .select('profile_name, settings')
+            .eq('user_id', user.id);
+        
+        if (!profilesError && profilesData) {
+            for (const profile of profilesData) {
+                console.log(`🧹 Checking profile: ${profile.profile_name}`);
+                
+                if (profile.settings?.apiKeys && typeof profile.settings.apiKeys === 'object') {
+                    const plaintextProviders = Object.keys(profile.settings.apiKeys).filter(k => profile.settings.apiKeys[k] && profile.settings.apiKeys[k].trim() !== '');
+                    if (plaintextProviders.length > 0) {
+                        const cleanedSettings = { ...profile.settings, apiKeys: {} };
+                        await client
+                            .from('user_profiles')
+                            .update({ settings: cleanedSettings })
+                            .eq('user_id', user.id)
+                            .eq('profile_name', profile.profile_name);
+                        cleanedCount++;
+                        details.push({
+                            location: `profile:${profile.profile_name}`,
+                            providers_cleaned: plaintextProviders
+                        });
+                        console.log('🧹 Cleaned plain text API keys from profile:', profile.profile_name, 'for providers:', plaintextProviders);
+                    } else {
+                        console.log(`ℹ️ Profile ${profile.profile_name}: No plain text API keys to clean`);
+                    }
+                } else {
+                    console.log(`ℹ️ Profile ${profile.profile_name}: No API keys object found or already encrypted`);
+                }
+            }
+        }
+        
+        console.log('🧹 Security cleanup complete:', {
+            cleaned_count: cleanedCount,
+            details: details
+        });
+        
+        return {
+            error: null,
+            message: `Security cleanup complete. Cleaned ${cleanedCount} item(s).`,
+            cleanedCount: cleanedCount,
+            details: details
+        };
+        
+    } catch (err) {
+        console.error('🚨 Security cleanup error:', err);
+        return { error: 'Failed to perform security cleanup' };
+    }
+}
+
 // Export the auth functions to window object for use in sidebar.js
 window.SupabaseAuth = {
     initializeSupabase,
@@ -734,13 +1035,14 @@ window.SupabaseAuth = {
     signUpWithOtp,
     signInWithOtp,
     verifyOtp,
-    verifyEmailOtp,
     saveUserSettings,
     loadUserSettings,
     resetPassword,
     saveUserProfile,
     loadUserProfiles,
-    deleteUserProfile
+    deleteUserProfile,
+    auditDatabaseSecurity,
+    cleanupPlaintextApiKeys
 };
 
 // Initialize when the script loads

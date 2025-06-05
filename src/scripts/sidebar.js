@@ -122,11 +122,9 @@ let otpType = ''; // 'signup' or 'signin'
 let currentAuthFlow = ''; // 'signup' or 'reset'
 let currentAuthEmail = '';
 
-// Default settings
-let settings = {
-    maxWordCount: 10, // Default maximum word count for translation
-    debugSelection: false, // Show/hide selected text and sentence for debugging
-    layoutMode: 'overlay', // 'overlay' or 'shift'
+// Default settings - SPLIT INTO GLOBAL AND PROFILE-SPECIFIC
+let globalSettings = {
+    // Shared across all profiles
     enabledProviders: {
         google: true,
         deepl: false,
@@ -144,11 +142,24 @@ let settings = {
         openai: "",
         claude: "",
         gemini: ""
-    },
+    }
+};
+
+let profileSettings = {
+    // Profile-specific settings only
+    maxWordCount: 10, // Default maximum word count for translation
+    debugSelection: false, // Show/hide selected text and sentence for debugging
+    layoutMode: 'overlay', // 'overlay' or 'shift'
     defaultTargetLanguage: "ru",
     translationBoxes: [
         { provider: "google", targetLanguage: "ru" }
     ]
+};
+
+// Keep legacy settings object for backward compatibility during transition
+let settings = {
+    ...profileSettings,
+    ...globalSettings
 };
 
 // Separate dynamic data cache (not stored in profiles)
@@ -403,21 +414,40 @@ async function checkAuthStatus() {
             isAuthenticated = true;
             currentUser = response.data.user;
             syncEnabled = true;
+            
+            // Try to retrieve stored password for encryption
+            if (!userPassword) {
+                userPassword = await retrieveUserPassword();
+                console.log('🔐 Retrieved stored password:', !!userPassword);
+            }
+            
             updateAuthUI(true);
             
-            // Load data from Supabase only if not already synced recently
-            if (!window.lastSuccessfulSync || (Date.now() - window.lastSuccessfulSync) > 60000) {
-                console.log('🔐 Loading data from Supabase after auth check...');
-                try {
-                    await syncFromSupabase();
-                    window.lastSuccessfulSync = Date.now();
-                } catch (syncError) {
-                    console.warn('🔐 Failed to sync after auth check, but auth is valid:', syncError);
-                    // Don't fail the auth check just because sync failed
-                }
+                    // Always load data from Supabase when user changes or first auth
+        const previousUserId = window.lastSyncedUserId;
+        const currentUserId = currentUser?.id;
+        
+        if (!window.lastSuccessfulSync || 
+            (Date.now() - window.lastSuccessfulSync) > 60000 ||
+            previousUserId !== currentUserId) {
+            
+            if (previousUserId !== currentUserId) {
+                console.log('🔐 User changed, forcing sync from cloud...');
             } else {
-                console.log('🔐 Skipping sync - recently synced');
+                console.log('🔐 Loading data from Supabase after auth check...');
             }
+            
+            try {
+                await syncFromSupabase();
+                window.lastSuccessfulSync = Date.now();
+                window.lastSyncedUserId = currentUserId;
+            } catch (syncError) {
+                console.warn('🔐 Failed to sync after auth check, but auth is valid:', syncError);
+                // Don't fail the auth check just because sync failed
+            }
+        } else {
+            console.log('🔐 Skipping sync - recently synced for same user');
+        }
         } else {
             console.log('🔐 User not authenticated');
             isAuthenticated = false;
@@ -572,6 +602,7 @@ async function handleSignIn() {
             showAuthMessage(signinMessage, 'Signed in successfully!', 'success');
 
             userPassword = password;
+            await storeUserPassword(password); // Store securely for later use
             
             // Clear form
             document.getElementById('signin-email').value = '';
@@ -631,6 +662,13 @@ async function handleSignOut() {
             currentUser = null;
             syncEnabled = false;
             userPassword = null;
+            
+            // Clear sync tracking to force fresh sync on next login
+            window.lastSuccessfulSync = null;
+            window.lastSyncedUserId = null;
+            console.log('🔐 Cleared sync tracking for fresh login');
+            
+            clearStoredPassword(); // Clear stored password on sign out
             updateAuthUI(false);
             showSyncMessage('Signed out successfully.', 'success');
         }
@@ -677,80 +715,8 @@ async function handleSignUpWithOtp() {
     }
 }
 
-// Handle sign in with OTP
-async function handleSignInWithOtp() {
-    const email = document.getElementById('signin-otp-email')?.value;
-    
-    if (!email) {
-        showAuthMessage(signinOtpMessage, 'Please enter your email.', 'error');
-        return;
-    }
-    
-    try {
-        showAuthMessage(signinOtpMessage, 'Sending verification code...', 'info');
-        signinOtpSend.disabled = true;
-        
-        const { data, error } = await window.SupabaseAuth.signInWithOtp(email);
-        
-        if (error) {
-            showAuthMessage(signinOtpMessage, error, 'error');
-        } else {
-            showAuthMessage(signinOtpMessage, 'Verification code sent! Check your email.', 'success');
-            
-            // Store email and type for verification
-            otpEmail = email;
-            otpType = 'signin';
-            
-            // Show OTP verification form
-            setTimeout(() => {
-                showOtpVerifyForm();
-            }, 1500);
-        }
-    } catch (err) {
-        console.error('🔐 Sign in with OTP error:', err);
-        showAuthMessage(signinOtpMessage, 'Failed to send verification code. Please try again.', 'error');
-    } finally {
-        signinOtpSend.disabled = false;
-    }
-}
-
-// Handle OTP verification
-async function handleOtpVerification() {
-    const code = document.getElementById('otp-code')?.value;
-    
-    if (!code || code.length !== 6) {
-        showAuthMessage(otpVerifyMessage, 'Please enter a valid 6-digit code.', 'error');
-        return;
-    }
-    
-    try {
-        showAuthMessage(otpVerifyMessage, 'Verifying code...', 'info');
-        otpVerifySubmit.disabled = true;
-        
-        const otpChannel = otpType === 'signup' ? 'signup' : 'email';
-        const { data, error } = await window.SupabaseAuth.verifyOtp(otpEmail, code, otpChannel);
-        
-        if (error) {
-            showAuthMessage(otpVerifyMessage, error, 'error');
-        } else {
-            showAuthMessage(otpVerifyMessage, 'Verification successful!', 'success');
-            
-            // Clear OTP form
-            document.getElementById('otp-code').value = '';
-            
-            // Update auth status
-            await checkAuthStatus();
-            
-            // Hide form
-            hideAuthForms();
-        }
-    } catch (err) {
-        console.error('🔐 OTP verification error:', err);
-        showAuthMessage(otpVerifyMessage, 'Verification failed. Please try again.', 'error');
-    } finally {
-        otpVerifySubmit.disabled = false;
-    }
-}
+// Legacy OTP verification function - now handled by the new multi-step flow
+// Keeping for backwards compatibility, but not actively used
 
 // Handle OTP resend
 async function handleOtpResend() {
@@ -841,13 +807,8 @@ async function handleTokenStep() {
         showAuthMessage(tokenStepMessage, 'Verifying code...', 'info');
         tokenStepSubmit.disabled = true;
         
-        // Use different verification methods based on the flow
-        let result;
-        if (currentAuthFlow === 'signup') {
-            result = await window.SupabaseAuth.verifyEmailOtp(currentAuthEmail, code);
-        } else {
-            result = await window.SupabaseAuth.verifyOtp(currentAuthEmail, code, 'email');
-        }
+        // Use verifyOtp for both signup and signin flows
+        const result = await window.SupabaseAuth.verifyOtp(currentAuthEmail, code, 'email');
         const { data, error } = result;
         
         if (error) {
@@ -889,20 +850,29 @@ async function handlePasswordStep() {
         showAuthMessage(passwordStepMessage, 'Setting password...', 'info');
         passwordStepSubmit.disabled = true;
         
-        // For signup, the user is already created via OTP
-        // For password reset, we need to update the password
+        // For password reset, we need to update the password using the Supabase client directly
         if (currentAuthFlow === 'reset') {
-            const { error } = await window.SupabaseAuth.updatePassword(password);
-            if (error) {
-                showAuthMessage(passwordStepMessage, error, 'error');
+            const client = window.SupabaseAuth.getSupabaseClient();
+            if (!client) {
+                showAuthMessage(passwordStepMessage, 'Supabase client not available', 'error');
                 return;
             }
+            
+            const { error } = await client.auth.updateUser({ password: password });
+            if (error) {
+                console.error('🔐 Password update error:', error);
+                showAuthMessage(passwordStepMessage, error.message || 'Failed to update password', 'error');
+                return;
+            }
+            
+            console.log('✅ Password updated successfully via Supabase client');
         }
         
         showAuthMessage(passwordStepMessage, 'Password set successfully!', 'success');
         
         // Store password for encryption
         userPassword = password;
+        await storeUserPassword(password); // Store securely for later use
         
         // Clear form
         passwordStepInput.value = '';
@@ -910,8 +880,22 @@ async function handlePasswordStep() {
         // Update auth status
         await checkAuthStatus();
         
-        // Hide forms
-        hideAuthForms();
+        // Immediately sync current profile to cloud after successful signup or password reset
+        // This ensures the user's profile is established in the cloud database
+        if (isAuthenticated && syncEnabled && !syncInProgress) {
+            console.log('🔄 Syncing profile to cloud after successful auth...');
+            try {
+                await syncToSupabase();
+                console.log('✅ Profile synced to cloud after auth');
+            } catch (syncError) {
+                console.error('❌ Failed to sync profile after auth:', syncError);
+                // Don't fail the auth flow, just log the error
+                showSyncMessage('Profile setup but sync to cloud failed. Will retry automatically.', 'warning');
+            }
+        }
+        
+        // Hide forms and reset state (flow completed successfully)
+        hideAuthForms(true);
         
     } catch (err) {
         console.error('🔐 Password step error:', err);
@@ -1063,18 +1047,60 @@ async function syncToSupabase() {
             updateAuthUI(true);
         }
         
-        // Save global settings
-        console.log('🔄 Saving user settings...');
-        const settingsResult = await window.SupabaseAuth.saveUserSettings(settings, userPassword);
+        // REFACTORED: Save global settings (API keys and enabled providers only)
+        console.log('🔄 Saving global user settings...');
+        
+        // Get current global settings from UI
+        const currentGlobalSettings = getCurrentGlobalSettings();
+        
+        console.log('🔐 Debug - userPassword available:', !!userPassword);
+        console.log('🔐 Debug - globalSettings.apiKeys:', currentGlobalSettings.apiKeys);
+        
+        // Check if we have API keys but no password for encryption
+        const hasApiKeys = Object.values(currentGlobalSettings.apiKeys || {}).some(key => key && key.trim() !== '');
+        if (hasApiKeys && !userPassword) {
+            console.log('🔐 API keys present but no password available, attempting to retrieve stored password...');
+            
+            // Try to retrieve stored password first
+            userPassword = await retrieveUserPassword();
+            
+            if (!userPassword) {
+                console.log('🔐 No stored password found, prompting user...');
+                userPassword = await promptForPassword();
+                if (!userPassword) {
+                    throw new Error('Password required for API key encryption. Cannot sync API keys to cloud without encryption.');
+                }
+                // Store the password for future use
+                await storeUserPassword(userPassword);
+                console.log('🔐 Password provided and stored for future use');
+            } else {
+                console.log('🔐 Retrieved stored password successfully');
+            }
+        } else if (hasApiKeys && userPassword) {
+            console.log('🔐 API keys present and password available for encryption');
+        } else if (!hasApiKeys) {
+            console.log('🔐 No API keys present, password not required for sync');
+        }
+        
+        // Update global settings and save to cloud
+        globalSettings = { ...currentGlobalSettings };
+        
+        // Update legacy settings object for backward compatibility
+        settings = {
+            ...profileSettings,
+            ...globalSettings
+        };
+        
+        const settingsResult = await window.SupabaseAuth.saveUserSettings(globalSettings, userPassword);
         if (settingsResult.error) {
             throw new Error(`Settings sync failed: ${settingsResult.error}`);
         }
         
-        // Save all profiles
+        // Save all profiles (profile-specific settings only)
         console.log('🔄 Saving user profiles...');
-        const profilePromises = Object.entries(profiles).map(([profileName, profileSettings]) => {
+        const profilePromises = Object.entries(profiles).map(([profileName, profileData]) => {
             const isCurrent = profileName === currentProfileName;
-            return window.SupabaseAuth.saveUserProfile(profileName, profileSettings, isCurrent);
+            return window.SupabaseAuth.saveUserProfile(profileName, profileData, isCurrent);
         });
         
         const profileResults = await Promise.all(profilePromises);
@@ -1181,22 +1207,50 @@ async function syncFromSupabase() {
         }
         
         if (settingsResult.data) {
-            // Merge remote settings with local defaults
-            settings = {
-                ...settings,
-                maxWordCount: settingsResult.data.max_word_count || settings.maxWordCount,
-                debugSelection: settingsResult.data.debug_selection !== undefined ? settingsResult.data.debug_selection : settings.debugSelection,
-                defaultTargetLanguage: settingsResult.data.default_target_language || settings.defaultTargetLanguage,
-                layoutMode: settingsResult.data.layout_mode || settings.layoutMode,
+            console.log('🔄 Merging cloud global settings with local global settings...');
+            console.log('🔄 Local API keys before merge:', Object.keys(globalSettings.apiKeys).filter(k => globalSettings.apiKeys[k]));
+            console.log('🔄 Cloud API keys:', Object.keys(settingsResult.data.api_keys || {}).filter(k => settingsResult.data.api_keys[k]));
+            
+            // Smart merge: local non-empty values take precedence, cloud fills empty locals
+            const mergedApiKeys = { ...globalSettings.apiKeys };
+            const cloudApiKeys = settingsResult.data.api_keys || {};
+            
+            // For each provider, use local if non-empty, otherwise use cloud
+            for (const provider in cloudApiKeys) {
+                if (!mergedApiKeys[provider] || mergedApiKeys[provider].trim() === '') {
+                    mergedApiKeys[provider] = cloudApiKeys[provider];
+                    console.log(`🔄 Populated ${provider} API key from cloud (local was empty)`);
+                } else {
+                    console.log(`🔄 Kept local ${provider} API key (non-empty)`);
+                }
+            }
+            
+            // REFACTORED: Merge only global settings (API keys and enabled providers)
+            const previousGlobalSettings = { ...globalSettings };
+            globalSettings = {
                 enabledProviders: {
-                    ...settings.enabledProviders,
+                    ...globalSettings.enabledProviders,
                     ...settingsResult.data.enabled_providers
                 },
-                apiKeys: {
-                    ...settings.apiKeys,
-                    ...settingsResult.data.api_keys
-                }
+                apiKeys: mergedApiKeys
             };
+            
+            console.log('🔄 Final merged API keys:', Object.keys(globalSettings.apiKeys).filter(k => globalSettings.apiKeys[k]));
+            
+            // Check if we need to sync back to cloud due to local precedence
+            const hasLocalUpdates = JSON.stringify(previousGlobalSettings.apiKeys) !== JSON.stringify(globalSettings.apiKeys) ||
+                                  JSON.stringify(previousGlobalSettings.enabledProviders) !== JSON.stringify(globalSettings.enabledProviders);
+            
+            if (hasLocalUpdates) {
+                console.log('🔄 Local global settings took precedence, will sync back to cloud...');
+                // Schedule a sync back to cloud after loading is complete
+                setTimeout(() => {
+                    if (isAuthenticated && syncEnabled && !syncInProgress) {
+                        console.log('🔄 Syncing merged global settings back to cloud...');
+                        syncToSupabase();
+                    }
+                }, 2000);
+            }
             
             // Handle dynamic data separately if it exists in Supabase
             if (settingsResult.data.supported_languages || settingsResult.data.available_models) {
@@ -1222,36 +1276,85 @@ async function syncFromSupabase() {
 
             if (settingsResult.decryptionFailed) {
                 showSyncMessage('API keys could not be decrypted. They have been cleared.', 'error');
+                globalSettings.apiKeys = {};
                 settings.apiKeys = {};
-                await window.SupabaseAuth.saveUserSettings(settings, userPassword);
+                await window.SupabaseAuth.saveUserSettings(globalSettings, userPassword);
+            }
+            
+            if (settingsResult.plaintextKeysDetected) {
+                showSyncMessage('🚨 SECURITY: Plain text API keys detected and blocked. Please re-enter your API keys.', 'error');
+                globalSettings.apiKeys = {};
+                settings.apiKeys = {};
+                // Force immediate re-encryption of settings to secure the database
+                if (userPassword) {
+                    await window.SupabaseAuth.saveUserSettings(globalSettings, userPassword);
+                }
             }
         }
         
         // Load profiles
         console.log('🔄 Loading user profiles...');
-        const profilesResult = await window.SupabaseAuth.loadUserProfiles();
+        const profilesResult = await window.SupabaseAuth.loadUserProfiles(userPassword);
         if (profilesResult.error && profilesResult.error !== 'User not authenticated') {
             throw new Error(`Profiles load failed: ${profilesResult.error}`);
         }
         
         if (profilesResult.data && profilesResult.data.length > 0) {
-            profiles = {};
+            console.log('🔄 Merging cloud profiles with local profiles...');
+            console.log('🔄 Local profiles before merge:', Object.keys(profiles));
+            console.log('🔄 Cloud profiles:', profilesResult.data.map(p => p.profile_name));
+            
+            const cloudProfiles = {};
+            let cloudCurrentProfile = null;
             let foundCurrentProfile = false;
             
+            // Process cloud profiles
             profilesResult.data.forEach(profile => {
-                profiles[profile.profile_name] = profile.settings;
+                cloudProfiles[profile.profile_name] = profile.settings;
                 if (profile.is_current) {
-                    currentProfileName = profile.profile_name;
+                    cloudCurrentProfile = profile.profile_name;
                     foundCurrentProfile = true;
                 }
             });
             
-            // If no current profile was marked, use the first one
-            if (!foundCurrentProfile && Object.keys(profiles).length > 0) {
-                currentProfileName = Object.keys(profiles)[0];
+            // Smart merge: preserve local profiles, add missing cloud profiles
+            const mergedProfiles = { ...profiles };
+            let hasProfileUpdates = false;
+            
+            // Add cloud profiles that don't exist locally
+            for (const profileName in cloudProfiles) {
+                if (!mergedProfiles[profileName]) {
+                    mergedProfiles[profileName] = cloudProfiles[profileName];
+                    console.log(`🔄 Added cloud profile: ${profileName}`);
+                    hasProfileUpdates = true;
+                } else {
+                    console.log(`🔄 Kept local profile: ${profileName}`);
+                }
             }
             
-            console.log('🔄 Loaded profiles from Supabase:', Object.keys(profiles));
+            profiles = mergedProfiles;
+            
+            // Handle current profile selection
+            if (!currentProfileName && cloudCurrentProfile && profiles[cloudCurrentProfile]) {
+                currentProfileName = cloudCurrentProfile;
+                console.log(`🔄 Set current profile from cloud: ${cloudCurrentProfile}`);
+            } else if (!currentProfileName && Object.keys(profiles).length > 0) {
+                currentProfileName = Object.keys(profiles)[0];
+                console.log(`🔄 Set first available profile as current: ${currentProfileName}`);
+            }
+            
+            console.log('🔄 Final merged profiles:', Object.keys(profiles));
+            console.log('🔄 Current profile:', currentProfileName);
+            
+            // Schedule sync back if we had local updates
+            if (hasProfileUpdates) {
+                setTimeout(() => {
+                    if (isAuthenticated && syncEnabled && !syncInProgress) {
+                        console.log('🔄 Syncing merged profiles back to cloud...');
+                        syncToSupabase();
+                    }
+                }, 3000);
+            }
         }
         
         // Update UI
@@ -1334,7 +1437,7 @@ function showSignUpForm() {
     signupForm.classList.remove('hidden');
 }
 
-function hideAuthForms() {
+function hideAuthForms(resetState = false) {
     authLocalMode && authLocalMode.classList.add('hidden');
     signinForm.classList.add('hidden');
     signupForm && signupForm.classList.add('hidden');
@@ -1358,21 +1461,15 @@ function hideAuthForms() {
     if (tokenStepMessage) tokenStepMessage.style.display = 'none';
     if (passwordStepMessage) passwordStepMessage.style.display = 'none';
     
-    // Reset auth flow state
-    currentAuthFlow = '';
-    currentAuthEmail = '';
+    // Reset auth flow state only if explicitly requested
+    if (resetState) {
+        currentAuthFlow = '';
+        currentAuthEmail = '';
+    }
 }
 
-// Show specific OTP forms
-function showSignUpOtpForm() {
-    hideAuthForms();
-    signupOtpForm.classList.remove('hidden');
-}
-
-function showSignInOtpForm() {
-    hideAuthForms();
-    signinOtpForm.classList.remove('hidden');
-}
+// Legacy OTP form functions - removed (using new multi-step flow instead)
+// showSignUpOtpForm and showSignInOtpForm removed as they reference non-existent elements
 
 function showOtpVerifyForm() {
     hideAuthForms();
@@ -1408,7 +1505,7 @@ function showEmailStepForm(flow) {
 }
 
 function showTokenStepForm() {
-    hideAuthForms();
+    hideAuthForms(); // Don't reset state during form transitions
     if (tokenStepForm) {
         tokenStepForm.classList.remove('hidden');
         
@@ -1423,7 +1520,7 @@ function showTokenStepForm() {
 }
 
 function showPasswordStepForm() {
-    hideAuthForms();
+    hideAuthForms(); // Don't reset state during form transitions
     if (passwordStepForm) {
         passwordStepForm.classList.remove('hidden');
         
@@ -1542,19 +1639,25 @@ function loadProfile(profileName, saveCurrentFirst = true) {
     
     console.log('LoadProfile: Loading profile:', profileName);
     
-    // Save current settings to current profile if specified
+    // Save current profile-specific settings to current profile if specified
     if (saveCurrentFirst && currentProfileName && profiles[currentProfileName]) {
         const currentSettings = getCurrentSettings();
         profiles[currentProfileName] = JSON.parse(JSON.stringify(currentSettings));
-        console.log('LoadProfile: Saved current settings to:', currentProfileName);
+        console.log('LoadProfile: Saved current profile settings to:', currentProfileName);
     }
     
-    // Load new profile
-    const profileSettings = profiles[profileName];
-    settings = JSON.parse(JSON.stringify(profileSettings));
+    // Load new profile (profile-specific settings only)
+    const newProfileSettings = profiles[profileName];
+    profileSettings = JSON.parse(JSON.stringify(newProfileSettings));
     currentProfileName = profileName;
     
-    console.log('LoadProfile: Loaded settings for profile:', profileName);
+    // Update legacy settings object for backward compatibility
+    settings = {
+        ...profileSettings,
+        ...globalSettings
+    };
+    
+    console.log('LoadProfile: Loaded profile settings for:', profileName);
     
     // Update UI
     updateSettingsUI();
@@ -1677,38 +1780,44 @@ function getCurrentSettings() {
     
     // Get current settings from UI
     const maxWordCountInput = document.getElementById('max-word-count');
-    const maxWordCount = maxWordCountInput ? parseInt(maxWordCountInput.value) || 10 : settings.maxWordCount;
+    const maxWordCount = maxWordCountInput ? parseInt(maxWordCountInput.value) || 10 : profileSettings.maxWordCount;
     
     // Get debug selection setting
     const debugSelectionCheckbox = document.getElementById('debug-selection');
-    const debugSelection = debugSelectionCheckbox ? debugSelectionCheckbox.checked : settings.debugSelection;
+    const debugSelection = debugSelectionCheckbox ? debugSelectionCheckbox.checked : profileSettings.debugSelection;
 
     const layoutModeSelect = document.getElementById('layout-mode');
-    const layoutMode = layoutModeSelect ? layoutModeSelect.value : settings.layoutMode;
+    const layoutMode = layoutModeSelect ? layoutModeSelect.value : profileSettings.layoutMode;
     
+    // REFACTORED: Return only profile-specific settings (no global settings like API keys or enabled providers)
+    return {
+        maxWordCount: maxWordCount,
+        debugSelection: debugSelection,
+        defaultTargetLanguage: profileSettings.defaultTargetLanguage,
+        translationBoxes: translationBoxes,
+        layoutMode: layoutMode
+    };
+}
+
+// NEW: Get current global settings from UI
+function getCurrentGlobalSettings() {
     // Get enabled providers from checkboxes
     const enabledProviders = {};
-    for (const provider in settings.enabledProviders) {
+    for (const provider in globalSettings.enabledProviders) {
         const checkbox = document.getElementById(`enable-${provider}`);
-        enabledProviders[provider] = checkbox ? checkbox.checked : settings.enabledProviders[provider];
+        enabledProviders[provider] = checkbox ? checkbox.checked : globalSettings.enabledProviders[provider];
     }
     
     // Get API keys from inputs
     const apiKeys = {};
-    for (const provider in settings.apiKeys) {
+    for (const provider in globalSettings.apiKeys) {
         const input = document.getElementById(`${provider}-api-key`);
-        apiKeys[provider] = input ? input.value : settings.apiKeys[provider];
+        apiKeys[provider] = input ? input.value : globalSettings.apiKeys[provider];
     }
     
-    // Only include user-specific settings, not dynamic data
     return {
-        maxWordCount: maxWordCount,
-        debugSelection: debugSelection,
         enabledProviders: enabledProviders,
-        apiKeys: apiKeys,
-        defaultTargetLanguage: settings.defaultTargetLanguage,
-        translationBoxes: translationBoxes,
-        layoutMode: layoutMode
+        apiKeys: apiKeys
     };
 }
 
@@ -2582,6 +2691,17 @@ function setupEventListeners() {
     if (updateLanguagesModelsButton) {
         updateLanguagesModelsButton.addEventListener('click', updateLanguagesAndModels);
     }
+
+    // Security audit and cleanup buttons
+    const auditSecurityButton = document.getElementById('audit-security');
+    if (auditSecurityButton) {
+        auditSecurityButton.addEventListener('click', handleSecurityAudit);
+    }
+
+    const cleanupPlaintextButton = document.getElementById('cleanup-plaintext');
+    if (cleanupPlaintextButton) {
+        cleanupPlaintextButton.addEventListener('click', handleCleanupPlaintext);
+    }
     
     // Debug selection checkbox - immediate visibility update
     const debugSelectionCheckbox = document.getElementById('debug-selection');
@@ -2716,7 +2836,7 @@ function setupEventListeners() {
     }
     
     if (signinCancel) {
-        signinCancel.addEventListener('click', hideAuthForms);
+        signinCancel.addEventListener('click', () => hideAuthForms(true));
     }
     
     if (signupSubmit) {
@@ -2761,7 +2881,7 @@ function setupEventListeners() {
     }
     
     if (signinOtpSend) {
-        signinOtpSend.addEventListener('click', handleSignInWithOtp);
+        // signinOtpSend.addEventListener('click', handleSignInWithOtp); // Removed - using simplified auth flow
     }
     
     if (signinOtpCancel) {
@@ -2801,7 +2921,7 @@ function setupEventListeners() {
     }
     
     if (emailStepCancel) {
-        emailStepCancel.addEventListener('click', hideAuthForms);
+        emailStepCancel.addEventListener('click', () => hideAuthForms(true));
     }
     
     if (tokenStepSubmit) {
@@ -2809,7 +2929,7 @@ function setupEventListeners() {
     }
     
     if (tokenStepCancel) {
-        tokenStepCancel.addEventListener('click', hideAuthForms);
+        tokenStepCancel.addEventListener('click', () => hideAuthForms(true));
     }
     
     if (tokenStepResend) {
@@ -2821,7 +2941,7 @@ function setupEventListeners() {
     }
     
     if (passwordStepCancel) {
-        passwordStepCancel.addEventListener('click', hideAuthForms);
+        passwordStepCancel.addEventListener('click', () => hideAuthForms(true));
     }
     
     // Password toggle event listeners
@@ -3827,14 +3947,7 @@ if (document.readyState === 'loading') {
     initializeSidebar();
 }
 
-// Primary authentication (OTP) event listeners
-if (showSigninButton) {
-    showSigninButton.addEventListener('click', showSignInOtpForm);
-}
-
-if (showSignupButton) {
-    showSignupButton.addEventListener('click', showSignUpOtpForm);
-}
+// Legacy authentication event listeners - removed (using new multi-step flow instead)
 
 // Advanced auth options
 if (showAdvancedAuth) {
@@ -4254,6 +4367,261 @@ async function ensureAIModelsAvailable(provider) {
     }
 }
 
+// Prompt user for password when needed for encryption
+async function promptForPassword() {
+    return new Promise((resolve) => {
+        // Create modal overlay
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 10000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        `;
+        
+        // Create modal content
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            background: var(--bg-color, #1a1a1a);
+            border: 1px solid var(--border-color, #333);
+            border-radius: 8px;
+            padding: 24px;
+            max-width: 400px;
+            width: 90%;
+            color: var(--text-color, #fff);
+        `;
+        
+        modal.innerHTML = `
+            <h3 style="margin: 0 0 16px 0; font-size: 18px;">🔐 Password Required</h3>
+            <p style="margin: 0 0 16px 0; font-size: 14px; opacity: 0.8;">
+                Enter your password to encrypt your API keys before saving to cloud.
+            </p>
+            <input type="password" id="encrypt-password" placeholder="Enter your password" 
+                   style="width: 100%; padding: 8px 12px; border: 1px solid var(--border-color, #333); 
+                          border-radius: 4px; background: var(--input-bg, #2a2a2a); 
+                          color: var(--text-color, #fff); margin-bottom: 16px;">
+            <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                <button id="encrypt-cancel" style="padding: 8px 16px; border: 1px solid var(--border-color, #333); 
+                                                   border-radius: 4px; background: transparent; 
+                                                   color: var(--text-color, #fff); cursor: pointer;">
+                    Cancel
+                </button>
+                <button id="encrypt-confirm" style="padding: 8px 16px; border: 1px solid var(--accent-color, #007acc); 
+                                                    border-radius: 4px; background: var(--accent-color, #007acc); 
+                                                    color: white; cursor: pointer;">
+                    Encrypt & Save
+                </button>
+            </div>
+        `;
+        
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+        
+        const passwordInput = document.getElementById('encrypt-password');
+        const cancelBtn = document.getElementById('encrypt-cancel');
+        const confirmBtn = document.getElementById('encrypt-confirm');
+        
+        passwordInput.focus();
+        
+        function cleanup() {
+            document.body.removeChild(overlay);
+        }
+        
+        function handleConfirm() {
+            const password = passwordInput.value.trim();
+            if (password) {
+                cleanup();
+                resolve(password);
+            } else {
+                passwordInput.style.borderColor = '#ff4444';
+                passwordInput.placeholder = 'Password is required';
+            }
+        }
+        
+        function handleCancel() {
+            cleanup();
+            resolve(null);
+        }
+        
+        // Event listeners
+        confirmBtn.addEventListener('click', handleConfirm);
+        cancelBtn.addEventListener('click', handleCancel);
+        passwordInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleConfirm();
+            } else if (e.key === 'Escape') {
+                handleCancel();
+            }
+        });
+        
+        // Click outside to cancel
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                handleCancel();
+            }
+        });
+    });
+}
+
+// Password storage helpers
+async function storeUserPassword(password) {
+    if (!password) return;
+    
+    try {
+        // Get current session to use as encryption key
+        const { data: { session } } = await window.SupabaseAuth.getCurrentSession();
+        if (!session?.access_token) {
+            console.warn('🔐 No session available, cannot store password securely');
+            return;
+        }
+        
+        // Use first 32 chars of access token as encryption key
+        const sessionKey = session.access_token.substring(0, 32);
+        const encoder = new TextEncoder();
+        const decoder = new TextDecoder();
+        
+        // Encrypt password with session key
+        const keyMaterial = await crypto.subtle.importKey(
+            'raw',
+            encoder.encode(sessionKey),
+            'PBKDF2',
+            false,
+            ['deriveKey']
+        );
+        
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+        const encryptionKey = await crypto.subtle.deriveKey(
+            {
+                name: 'PBKDF2',
+                salt: salt,
+                iterations: 1000,
+                hash: 'SHA-256'
+            },
+            keyMaterial,
+            { name: 'AES-GCM', length: 256 },
+            false,
+            ['encrypt']
+        );
+        
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const encrypted = await crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv: iv },
+            encryptionKey,
+            encoder.encode(password)
+        );
+        
+        // Store encrypted password with salt and iv
+        const encryptedData = {
+            encrypted: Array.from(new Uint8Array(encrypted)),
+            salt: Array.from(salt),
+            iv: Array.from(iv),
+            userId: session.user?.id
+        };
+        
+        chrome.storage.local.set({ 'encrypted_user_password': encryptedData }, () => {
+            console.log('🔐 Password stored securely');
+        });
+        
+    } catch (error) {
+        console.error('🔐 Failed to store password:', error);
+    }
+}
+
+async function retrieveUserPassword() {
+    try {
+        // Get current session
+        const { data: { session } } = await window.SupabaseAuth.getCurrentSession();
+        if (!session?.access_token) {
+            console.log('🔐 No session available, cannot retrieve password');
+            return null;
+        }
+        
+        // Get encrypted password from storage
+        return new Promise((resolve) => {
+            chrome.storage.local.get(['encrypted_user_password'], async (result) => {
+                try {
+                    const encryptedData = result.encrypted_user_password;
+                    if (!encryptedData) {
+                        console.log('🔐 No stored password found');
+                        resolve(null);
+                        return;
+                    }
+                    
+                    // Check if password belongs to current user
+                    if (encryptedData.userId !== session.user?.id) {
+                        console.log('🔐 Stored password belongs to different user, clearing');
+                        chrome.storage.local.remove(['encrypted_user_password']);
+                        resolve(null);
+                        return;
+                    }
+                    
+                    // Use same session key for decryption
+                    const sessionKey = session.access_token.substring(0, 32);
+                    const encoder = new TextEncoder();
+                    const decoder = new TextDecoder();
+                    
+                    const keyMaterial = await crypto.subtle.importKey(
+                        'raw',
+                        encoder.encode(sessionKey),
+                        'PBKDF2',
+                        false,
+                        ['deriveKey']
+                    );
+                    
+                    const salt = new Uint8Array(encryptedData.salt);
+                    const decryptionKey = await crypto.subtle.deriveKey(
+                        {
+                            name: 'PBKDF2',
+                            salt: salt,
+                            iterations: 1000,
+                            hash: 'SHA-256'
+                        },
+                        keyMaterial,
+                        { name: 'AES-GCM', length: 256 },
+                        false,
+                        ['decrypt']
+                    );
+                    
+                    const iv = new Uint8Array(encryptedData.iv);
+                    const encrypted = new Uint8Array(encryptedData.encrypted);
+                    
+                    const decrypted = await crypto.subtle.decrypt(
+                        { name: 'AES-GCM', iv: iv },
+                        decryptionKey,
+                        encrypted
+                    );
+                    
+                    const password = decoder.decode(decrypted);
+                    console.log('🔐 Password retrieved successfully');
+                    resolve(password);
+                    
+                } catch (error) {
+                    console.error('🔐 Failed to decrypt password:', error);
+                    // Clear corrupted data
+                    chrome.storage.local.remove(['encrypted_user_password']);
+                    resolve(null);
+                }
+            });
+        });
+        
+    } catch (error) {
+        console.error('🔐 Failed to retrieve password:', error);
+        return null;
+    }
+}
+
+function clearStoredPassword() {
+    chrome.storage.local.remove(['encrypted_user_password'], () => {
+        console.log('🔐 Stored password cleared');
+    });
+}
+
 // Handle enable cloud sync
 async function handleEnableCloudSync() {
     if (!enableCloudSyncButton || !enableCloudSyncMessage) {
@@ -4285,5 +4653,209 @@ async function handleEnableCloudSync() {
     } finally {
         enableCloudSyncButton.disabled = false;
         enableCloudSyncButton.textContent = 'Enable Cloud Sync';
+    }
+}
+
+// Security functions
+async function handleSecurityAudit() {
+    const auditButton = document.getElementById('audit-security');
+    const securityMessage = document.getElementById('security-message');
+    
+    if (!isAuthenticated || !syncEnabled) {
+        showSecurityMessage('Please sign in to audit database security.', 'error');
+        return;
+    }
+    
+    if (!window.SupabaseAuth || !window.SupabaseAuth.auditDatabaseSecurity) {
+        showSecurityMessage('Security audit function not available.', 'error');
+        return;
+    }
+    
+    try {
+        auditButton.disabled = true;
+        auditButton.textContent = '🔍 Auditing...';
+        showSecurityMessage('Scanning database for security issues...', 'info');
+        
+        const result = await window.SupabaseAuth.auditDatabaseSecurity();
+        
+        if (result.error) {
+            showSecurityMessage(`Audit failed: ${result.error}`, 'error');
+        } else {
+            if (result.issues.length === 0) {
+                // No issues found - show detailed success message
+                let message = '✅ Security Audit Complete: No issues found!\n\n';
+                if (result.summary) {
+                    message += `📊 Audit Summary:\n`;
+                    message += `• Locations checked: ${result.summary.total_locations_checked}\n`;
+                    message += `• Encrypted locations: ${result.summary.encrypted_locations}\n`;
+                    message += `• Empty locations: ${result.summary.empty_locations}\n`;
+                    message += `• Plain text locations: ${result.summary.plaintext_locations}\n\n`;
+                }
+                message += 'All API keys are properly encrypted or empty. Your data is secure! 🔒';
+                showSecurityMessage(message, 'success');
+            } else {
+                // Issues found - show detailed error message
+                let message = `🚨 Security Issues Found (${result.issues.length} issue${result.issues.length > 1 ? 's' : ''}):\n\n`;
+                
+                // Group issues by type for better readability
+                const userSettingsIssues = result.issues.filter(issue => issue.type === 'user_settings');
+                const profileIssues = result.issues.filter(issue => issue.type === 'profile');
+                
+                if (userSettingsIssues.length > 0) {
+                    message += '🔧 User Settings:\n';
+                    userSettingsIssues.forEach(issue => {
+                        message += `  • ${issue.description}\n`;
+                        if (issue.affected_providers && issue.affected_providers.length > 0) {
+                            message += `    Providers: ${issue.affected_providers.join(', ')}\n`;
+                        }
+                    });
+                    message += '\n';
+                }
+                
+                if (profileIssues.length > 0) {
+                    message += '👤 Profiles:\n';
+                    profileIssues.forEach(issue => {
+                        message += `  • ${issue.description}\n`;
+                        if (issue.affected_providers && issue.affected_providers.length > 0) {
+                            message += `    Providers: ${issue.affected_providers.join(', ')}\n`;
+                        }
+                    });
+                    message += '\n';
+                }
+                
+                if (result.summary) {
+                    message += `📊 Audit Summary:\n`;
+                    message += `• Total locations: ${result.summary.total_locations_checked}\n`;
+                    message += `• 🔒 Encrypted: ${result.summary.encrypted_locations}\n`;
+                    message += `• 📭 Empty: ${result.summary.empty_locations}\n`;
+                    message += `• 🚨 Plain text: ${result.summary.plaintext_locations}\n\n`;
+                }
+                
+                message += '⚠️ Use "Clean Plaintext API Keys" to fix these security issues.\n';
+                message += '📝 You will need to re-enter your API keys after cleanup.';
+                
+                showSecurityMessage(message, 'error');
+            }
+        }
+    } catch (error) {
+        console.error('Security audit error:', error);
+        showSecurityMessage('Security audit failed due to an unexpected error.', 'error');
+    } finally {
+        auditButton.disabled = false;
+        auditButton.textContent = '🔍 Audit Database Security';
+    }
+}
+
+async function handleCleanupPlaintext() {
+    const cleanupButton = document.getElementById('cleanup-plaintext');
+    
+    if (!isAuthenticated || !syncEnabled) {
+        showSecurityMessage('Please sign in to clean up database.', 'error');
+        return;
+    }
+    
+    if (!window.SupabaseAuth || !window.SupabaseAuth.cleanupPlaintextApiKeys) {
+        showSecurityMessage('Security cleanup function not available.', 'error');
+        return;
+    }
+    
+    // Enhanced confirmation with more details
+    const confirmed = confirm(
+        '🔒 SECURITY CLEANUP CONFIRMATION\n\n' +
+        '⚠️  This will permanently remove all plain text API keys from your cloud storage.\n\n' +
+        '📋 What will happen:\n' +
+        '   • All unencrypted API keys will be deleted\n' +
+        '   • Your profiles and settings will remain intact\n' +
+        '   • You will need to re-enter your API keys\n' +
+        '   • Future API keys will be properly encrypted\n\n' +
+        '💡 Tip: Have your API keys ready to re-enter after cleanup.\n\n' +
+        'Continue with security cleanup?'
+    );
+    
+    if (!confirmed) {
+        return;
+    }
+    
+    try {
+        cleanupButton.disabled = true;
+        cleanupButton.textContent = '🧹 Cleaning...';
+        showSecurityMessage('Removing plain text API keys from database...', 'info');
+        
+        const result = await window.SupabaseAuth.cleanupPlaintextApiKeys();
+        
+        if (result.error) {
+            showSecurityMessage(`Cleanup failed: ${result.error}`, 'error');
+        } else {
+            if (result.cleanedCount === 0) {
+                showSecurityMessage('✅ No plain text API keys found. Database is already secure! 🔒', 'success');
+            } else {
+                // Enhanced success message with details
+                let message = `✅ Security cleanup completed successfully!\n\n`;
+                message += `📊 Cleanup Summary:\n`;
+                message += `• Locations cleaned: ${result.cleanedCount}\n`;
+                
+                if (result.details && result.details.length > 0) {
+                    message += '\n🧹 Cleaned Locations:\n';
+                    result.details.forEach(detail => {
+                        message += `  • ${detail.location}\n`;
+                        if (detail.providers_cleaned && detail.providers_cleaned.length > 0) {
+                            message += `    Providers: ${detail.providers_cleaned.join(', ')}\n`;
+                        }
+                    });
+                }
+                
+                message += '\n🔐 Next Steps:\n';
+                message += '1. Re-enter your API keys in Settings\n';
+                message += '2. Save settings to encrypt and store them securely\n';
+                message += '3. Run another audit to verify security\n\n';
+                message += '⚠️ Important: Your API keys are now cleared and need to be re-entered.';
+                
+                showSecurityMessage(message, 'success');
+                
+                // Clear local API keys too for consistency
+                settings.apiKeys = {};
+                Object.keys(profiles).forEach(profileName => {
+                    if (profiles[profileName].apiKeys) {
+                        profiles[profileName].apiKeys = {};
+                    }
+                });
+                
+                // Update UI
+                updateSettingsUI();
+                saveSettings();
+                saveProfiles();
+                
+                // Show additional notification for immediate action
+                setTimeout(() => {
+                    showSecurityMessage(
+                        '🔔 Reminder: Please go to Settings and re-enter your API keys to continue using translation services.',
+                        'warning'
+                    );
+                }, 8000); // Show reminder after 8 seconds
+            }
+        }
+    } catch (error) {
+        console.error('Security cleanup error:', error);
+        showSecurityMessage('Security cleanup failed due to an unexpected error.', 'error');
+    } finally {
+        cleanupButton.disabled = false;
+        cleanupButton.textContent = '🧹 Clean Plaintext API Keys';
+    }
+}
+
+// Show security message
+function showSecurityMessage(message, type) {
+    const securityMessage = document.getElementById('security-message');
+    if (!securityMessage) return;
+    
+    securityMessage.textContent = message;
+    securityMessage.className = `security-message ${type}`;
+    securityMessage.style.display = 'block';
+    
+    // Auto-hide success and info messages after 5 seconds
+    if (type === 'success' || type === 'info') {
+        setTimeout(() => {
+            securityMessage.style.display = 'none';
+        }, 5000);
     }
 }
