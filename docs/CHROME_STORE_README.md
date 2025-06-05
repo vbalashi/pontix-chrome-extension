@@ -143,6 +143,8 @@ The extension requests these permissions:
 - **storage**: To save user preferences and translation history
 - **scripting**: To add the sidebar to web pages
 - **<all_urls>**: To work on any website (required for translation)
+- **https://play.google.com/** and **https://books.googleusercontent.com/**: To
+  capture selections in Google Books reader pages
 
 **Note**: Cloud sync features load external Supabase library from CDN only when user explicitly enables cloud sync.
 
