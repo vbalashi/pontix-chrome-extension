@@ -33,7 +33,12 @@ else
 fi
 
 # Copy icons directory
-cp -r icons/ build/ 2>/dev/null || echo "⚠️  Icons directory not found"
+if [ -d "icons" ]; then
+    cp -r icons build/
+    echo "✅ Icons directory copied"
+else
+    echo "⚠️  Icons directory not found"
+fi
 
 echo "✅ Extension built successfully in build/ directory"
 echo "📊 Build size:"
