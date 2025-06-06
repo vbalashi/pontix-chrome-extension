@@ -210,12 +210,11 @@
                         <span class="input-help">Display selected text and context sentence for debugging</span>
                     </div>
                     <div class="setting-row">
-                        <label for="layout-mode">Sidebar display:</label>
-                        <select id="layout-mode">
-                            <option value="overlay">Overlay</option>
-                            <option value="shift">Shift Page</option>
-                        </select>
-                        <span class="input-help">Choose how the sidebar affects the page</span>
+                        <div class="checkbox-container">
+                            <input type="checkbox" id="layout-mode">
+                            <label for="layout-mode">Shift page when sidebar opens</label>
+                        </div>
+                        <span class="input-help">Unchecked: Overlay mode (default) | Checked: Shift page mode</span>
                     </div>
                 </div>
                 

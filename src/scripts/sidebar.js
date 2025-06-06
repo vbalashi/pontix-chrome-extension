@@ -1237,6 +1237,12 @@ async function syncFromSupabase() {
             
             console.log('🔄 Final merged API keys:', Object.keys(globalSettings.apiKeys).filter(k => globalSettings.apiKeys[k]));
             
+            // CRITICAL FIX: Update legacy settings object with merged globalSettings
+            settings = {
+                ...profileSettings,
+                ...globalSettings
+            };
+            
             // Check if we need to sync back to cloud due to local precedence
             const hasLocalUpdates = JSON.stringify(previousGlobalSettings.apiKeys) !== JSON.stringify(globalSettings.apiKeys) ||
                                   JSON.stringify(previousGlobalSettings.enabledProviders) !== JSON.stringify(globalSettings.enabledProviders);
@@ -1786,8 +1792,8 @@ function getCurrentSettings() {
     const debugSelectionCheckbox = document.getElementById('debug-selection');
     const debugSelection = debugSelectionCheckbox ? debugSelectionCheckbox.checked : profileSettings.debugSelection;
 
-    const layoutModeSelect = document.getElementById('layout-mode');
-    const layoutMode = layoutModeSelect ? layoutModeSelect.value : profileSettings.layoutMode;
+    const layoutModeCheckbox = document.getElementById('layout-mode');
+    const layoutMode = layoutModeCheckbox ? (layoutModeCheckbox.checked ? 'shift' : 'overlay') : profileSettings.layoutMode;
     
     // REFACTORED: Return only profile-specific settings (no global settings like API keys or enabled providers)
     return {
@@ -2471,9 +2477,9 @@ function updateSettingsUI() {
         debugSelectionCheckbox.checked = settings.debugSelection;
     }
 
-    const layoutModeSelect = document.getElementById('layout-mode');
-    if (layoutModeSelect) {
-        layoutModeSelect.value = settings.layoutMode;
+    const layoutModeCheckbox = document.getElementById('layout-mode');
+    if (layoutModeCheckbox) {
+        layoutModeCheckbox.checked = settings.layoutMode === 'shift';
     }
     
     // Update provider checkboxes and API keys
@@ -2546,9 +2552,9 @@ function setupEventListeners() {
                 settings.debugSelection = debugSelectionCheckbox.checked;
             }
 
-            const layoutModeSelect = document.getElementById('layout-mode');
-            if (layoutModeSelect) {
-                settings.layoutMode = layoutModeSelect.value;
+            const layoutModeCheckbox = document.getElementById('layout-mode');
+            if (layoutModeCheckbox) {
+                settings.layoutMode = layoutModeCheckbox.checked ? 'shift' : 'overlay';
             }
             
             // Update provider settings and track newly enabled providers
@@ -2712,6 +2718,56 @@ function setupEventListeners() {
             updateDebugSelectionVisibility();
             // Also save the setting immediately
             saveSettings();
+        });
+    }
+
+    // Layout mode checkbox - immediate application
+    const layoutModeCheckbox = document.getElementById('layout-mode');
+    if (layoutModeCheckbox) {
+        layoutModeCheckbox.addEventListener('change', (e) => {
+            console.log('Layout mode checkbox changed:', e.target.checked);
+            settings.layoutMode = e.target.checked ? 'shift' : 'overlay';
+            // Also save the setting immediately
+            saveSettings();
+            
+            // Save to current profile if we have one
+            if (currentProfileName && profiles[currentProfileName]) {
+                const currentSettings = getCurrentSettings();
+                profiles[currentProfileName] = JSON.parse(JSON.stringify(currentSettings));
+                saveProfiles();
+            }
+            
+            // Sync to cloud if authenticated
+            if (isAuthenticated && syncEnabled && !syncInProgress) {
+                setTimeout(() => {
+                    syncToSupabase();
+                }, 1000);
+            }
+        });
+    }
+
+    // Max word count input - immediate application
+    const maxWordCountInput = document.getElementById('max-word-count');
+    if (maxWordCountInput) {
+        maxWordCountInput.addEventListener('change', (e) => {
+            console.log('Max word count changed:', e.target.value);
+            settings.maxWordCount = parseInt(e.target.value) || 10;
+            // Also save the setting immediately
+            saveSettings();
+            
+            // Save to current profile if we have one
+            if (currentProfileName && profiles[currentProfileName]) {
+                const currentSettings = getCurrentSettings();
+                profiles[currentProfileName] = JSON.parse(JSON.stringify(currentSettings));
+                saveProfiles();
+            }
+            
+            // Sync to cloud if authenticated
+            if (isAuthenticated && syncEnabled && !syncInProgress) {
+                setTimeout(() => {
+                    syncToSupabase();
+                }, 1000);
+            }
         });
     }
     

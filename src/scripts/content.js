@@ -706,8 +706,12 @@ if (window.translatorExtensionLoaded) {
             const hostname = window.location.hostname;
             const url = window.location.href;
             
+            // YouTube specific adjustments
+            if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
+                adjustYouTubeLayout();
+            }
             // Google Books specific adjustments - focus on main page containers only
-            if (hostname.includes('play.google.com') && url.includes('/books/')) {
+            else if (hostname.includes('play.google.com') && url.includes('/books/')) {
                 adjustGoogleBooksLayout();
             }
             // EPUB reader specific adjustments - very conservative
@@ -728,6 +732,118 @@ if (window.translatorExtensionLoaded) {
             adjustGeneralLayout();
             document.body.setAttribute('data-translator-layout-adjusted', 'true');
             layoutAdjusted = true;
+        }
+    }
+
+    function adjustYouTubeLayout() {
+        console.log("🎬 Applying YouTube specific layout adjustments");
+        
+        try {
+            // YouTube's main layout structure selectors in order of preference
+            const youtubeSelectors = [
+                // Main page container (most important)
+                '#page-manager',
+                '#content',
+                // Secondary containers
+                '#primary',
+                '#container', 
+                // Watch page specific
+                '#movie_player',
+                '#columns',
+                // General YouTube containers
+                'ytd-app',
+                'ytd-page-manager',
+                '#masthead-container',
+                // Fallback for older YouTube versions
+                '.watch-stage-content',
+                '.watch-content'
+            ];
+            
+            let adjusted = false;
+            
+            youtubeSelectors.forEach(selector => {
+                try {
+                    const elements = document.querySelectorAll(selector);
+                    elements.forEach(element => {
+                        if (element && !element.hasAttribute('data-translator-shifted') && 
+                            element !== document.body && element !== document.documentElement) {
+                            
+                            // Check if this element is a major layout container
+                            const rect = element.getBoundingClientRect();
+                            const computedStyle = window.getComputedStyle(element);
+                            
+                            // Only adjust containers that are:
+                            // 1. Wide enough to be main containers
+                            // 2. Not positioned absolutely/fixed (those are likely overlays)
+                            // 3. Have some meaningful height
+                            if (rect.width > window.innerWidth * 0.7 && 
+                                rect.height > 100 &&
+                                computedStyle.position !== 'absolute' &&
+                                computedStyle.position !== 'fixed') {
+                                
+                                console.log(`🎬 Adjusting YouTube container: ${selector}`, {
+                                    width: rect.width,
+                                    height: rect.height,
+                                    position: computedStyle.position
+                                });
+                                
+                                // Store original styles for restoration
+                                const originalMarginRight = element.style.marginRight;
+                                const originalMaxWidth = element.style.maxWidth;
+                                const originalWidth = element.style.width;
+                                
+                                element.setAttribute('data-translator-original-margin-right', originalMarginRight);
+                                element.setAttribute('data-translator-original-max-width', originalMaxWidth);
+                                element.setAttribute('data-translator-original-width', originalWidth);
+                                
+                                // Apply YouTube-specific adjustments
+                                // Use max-width to prevent content from flowing under sidebar
+                                element.style.maxWidth = `calc(100% - ${SIDEBAR_WIDTH}px)`;
+                                element.style.marginRight = `${SIDEBAR_WIDTH}px`;
+                                element.style.transition = "margin-right 0.3s ease-in-out, max-width 0.3s ease-in-out";
+                                element.setAttribute('data-translator-shifted', 'true');
+                                adjusted = true;
+                                
+                                // For specific YouTube containers, apply additional adjustments
+                                if (selector === '#page-manager' || selector === 'ytd-app') {
+                                    // Main app container - also constrain width
+                                    element.style.width = `calc(100% - ${SIDEBAR_WIDTH}px)`;
+                                }
+                            }
+                        }
+                    });
+                } catch (error) {
+                    console.warn(`🎬 Error adjusting YouTube container ${selector}:`, error);
+                }
+            });
+            
+            // Always apply general layout adjustments as well for body/html
+            adjustGeneralLayout();
+            
+            // Additional YouTube-specific adjustments for video player area
+            const playerContainer = document.querySelector('#movie_player') || 
+                                   document.querySelector('.html5-video-player') ||
+                                   document.querySelector('#player-container');
+            
+            if (playerContainer && !playerContainer.hasAttribute('data-translator-shifted')) {
+                console.log("🎬 Adjusting YouTube video player container");
+                const rect = playerContainer.getBoundingClientRect();
+                
+                if (rect.width > window.innerWidth * 0.6) {
+                    const originalMaxWidth = playerContainer.style.maxWidth;
+                    playerContainer.setAttribute('data-translator-original-max-width', originalMaxWidth);
+                    playerContainer.style.maxWidth = `calc(100% - ${SIDEBAR_WIDTH}px)`;
+                    playerContainer.style.transition = "max-width 0.3s ease-in-out";
+                    playerContainer.setAttribute('data-translator-shifted', 'true');
+                }
+            }
+            
+            console.log(`🎬 YouTube layout adjustment completed. Adjusted containers: ${adjusted}`);
+            
+        } catch (error) {
+            console.error("🎬 Error in YouTube layout adjustment:", error);
+            // Fall back to general layout adjustment
+            adjustGeneralLayout();
         }
     }
 
@@ -905,12 +1021,29 @@ if (window.translatorExtensionLoaded) {
                     
                     // Restore original margin-right style
                     const originalMarginRight = element.getAttribute('data-translator-original-margin-right');
-                    
                     if (originalMarginRight !== null) {
                         element.style.marginRight = originalMarginRight;
                         element.removeAttribute('data-translator-original-margin-right');
                     } else {
                         element.style.marginRight = "";
+                    }
+                    
+                    // Restore original max-width style (YouTube specific)
+                    const originalMaxWidth = element.getAttribute('data-translator-original-max-width');
+                    if (originalMaxWidth !== null) {
+                        element.style.maxWidth = originalMaxWidth;
+                        element.removeAttribute('data-translator-original-max-width');
+                    } else {
+                        element.style.maxWidth = "";
+                    }
+                    
+                    // Restore original width style (YouTube specific)
+                    const originalWidth = element.getAttribute('data-translator-original-width');
+                    if (originalWidth !== null) {
+                        element.style.width = originalWidth;
+                        element.removeAttribute('data-translator-original-width');
+                    } else {
+                        element.style.width = "";
                     }
                     
                     // Remove transition and shift marker
