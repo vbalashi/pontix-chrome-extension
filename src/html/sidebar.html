@@ -196,6 +196,17 @@
                 <div class="general-settings-section">
                     <h3>General Settings</h3>
                     <div class="setting-row">
+                        <div class="theme-selector">
+                            <label for="theme-select">Theme:</label>
+                            <select id="theme-select" class="theme-select">
+                                <option value="system">System</option>
+                                <option value="light">Light</option>
+                                <option value="dark">Dark</option>
+                            </select>
+                        </div>
+                        <span class="input-help">Choose your preferred theme or follow system settings</span>
+                    </div>
+                    <div class="setting-row">
                         <label for="max-word-count">Maximum words to translate:</label>
                         <div class="number-input-container">
                             <input type="number" id="max-word-count" min="1" max="100" value="25" step="1">

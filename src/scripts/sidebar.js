@@ -125,6 +125,7 @@ let currentAuthEmail = '';
 // Default settings - SPLIT INTO GLOBAL AND PROFILE-SPECIFIC
 let globalSettings = {
     // Shared across all profiles
+    theme: 'system', // 'system', 'light', or 'dark'
     enabledProviders: {
         google: true,
         deepl: false,
@@ -161,6 +162,51 @@ let settings = {
     ...profileSettings,
     ...globalSettings
 };
+
+// Theme management
+function applyTheme(theme) {
+    console.log('ApplyTheme: Applying theme:', theme);
+    
+    if (theme === 'system') {
+        // Remove explicit theme attribute to use system preference
+        document.documentElement.removeAttribute('data-theme');
+        
+        // Listen for system theme changes
+        if (window.matchMedia) {
+            const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (isDark) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
+        }
+    } else {
+        // Apply explicit theme
+        document.documentElement.setAttribute('data-theme', theme);
+    }
+}
+
+function setupSystemThemeListener() {
+    if (window.matchMedia) {
+        const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+        
+        function handleThemeChange(e) {
+            if (globalSettings.theme === 'system') {
+                if (e.matches) {
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                } else {
+                    document.documentElement.removeAttribute('data-theme');
+                }
+            }
+        }
+        
+        // Listen for changes
+        if (mediaQuery.addEventListener) {
+            mediaQuery.addEventListener('change', handleThemeChange);
+        } else if (mediaQuery.addListener) {
+            // Fallback for older browsers
+            mediaQuery.addListener(handleThemeChange);
+        }
+    }
+}
 
 // Separate dynamic data cache (not stored in profiles)
 let dynamicData = {
@@ -1225,9 +1271,10 @@ async function syncFromSupabase() {
                 }
             }
             
-            // REFACTORED: Merge only global settings (API keys and enabled providers)
+            // REFACTORED: Merge only global settings (API keys, enabled providers, and theme)
             const previousGlobalSettings = { ...globalSettings };
             globalSettings = {
+                theme: settingsResult.data.theme || globalSettings.theme,
                 enabledProviders: {
                     ...globalSettings.enabledProviders,
                     ...settingsResult.data.enabled_providers
@@ -1368,6 +1415,12 @@ async function syncFromSupabase() {
         updateProfileDropdown();
         updateProfilesList();
         restoreTranslationBoxes();
+        
+        // Apply theme after syncing from cloud
+        if (globalSettings.theme) {
+            console.log('SyncFromSupabase: Applying synced theme:', globalSettings.theme);
+            applyTheme(globalSettings.theme);
+        }
         
         if (syncStatus) {
             syncStatus.textContent = '✓ Synced';
@@ -1807,6 +1860,10 @@ function getCurrentSettings() {
 
 // NEW: Get current global settings from UI
 function getCurrentGlobalSettings() {
+    // Get theme setting
+    const themeSelect = document.getElementById('theme-select');
+    const theme = themeSelect ? themeSelect.value : globalSettings.theme;
+    
     // Get enabled providers from checkboxes
     const enabledProviders = {};
     for (const provider in globalSettings.enabledProviders) {
@@ -1822,6 +1879,7 @@ function getCurrentGlobalSettings() {
     }
     
     return {
+        theme: theme,
         enabledProviders: enabledProviders,
         apiKeys: apiKeys
     };
@@ -2111,6 +2169,13 @@ function initializeSidebar() {
         console.log('Setting up event listeners...');
         setupEventListeners();
         
+        // Setup system theme listener
+        console.log('Setting up theme system...');
+        setupSystemThemeListener();
+        
+        // Apply initial theme
+        applyTheme(globalSettings.theme);
+        
         // Load base settings first
         console.log('Loading base settings...');
         loadSettings();
@@ -2275,9 +2340,22 @@ function loadSettings() {
                         ...(result.translatorSettings.apiKeys || {})
                     }
                 };
+                
+                // Update global settings with theme if present
+                if (result.translatorSettings.theme) {
+                    globalSettings.theme = result.translatorSettings.theme;
+                }
+                
                 console.log('LoadSettings: Final merged settings:', settings);
             } else {
                 console.log('LoadSettings: No saved settings found, using defaults');
+            }
+            
+            // Apply theme after loading settings
+            if (globalSettings.theme || settings.theme) {
+                const theme = globalSettings.theme || settings.theme;
+                console.log('LoadSettings: Applying loaded theme:', theme);
+                applyTheme(theme);
             }
             
             // Load dynamic data separately
@@ -2465,6 +2543,12 @@ function restoreTranslationBoxes() {
 function updateSettingsUI() {
     console.log('UpdateSettingsUI: Updating UI with current settings...');
     
+    // Update theme selection
+    const themeSelect = document.getElementById('theme-select');
+    if (themeSelect) {
+        themeSelect.value = settings.theme || globalSettings.theme;
+    }
+    
     // Update max word count
     const maxWordCountInput = document.getElementById('max-word-count');
     if (maxWordCountInput) {
@@ -2533,6 +2617,29 @@ function setupEventListeners() {
         });
     }
     
+    // Theme selection
+    const themeSelect = document.getElementById('theme-select');
+    if (themeSelect) {
+        themeSelect.addEventListener('change', (e) => {
+            console.log('Theme selection changed:', e.target.value);
+            globalSettings.theme = e.target.value;
+            settings.theme = e.target.value; // Update legacy settings object
+            
+            // Apply theme immediately
+            applyTheme(e.target.value);
+            
+            // Save settings
+            saveSettings();
+            
+            // Sync to cloud if authenticated
+            if (isAuthenticated && syncEnabled && !syncInProgress) {
+                setTimeout(() => {
+                    syncToSupabase();
+                }, 1000);
+            }
+        });
+    }
+
     // Save settings button
     if (saveSettingsButton) {
         saveSettingsButton.addEventListener('click', async () => {
@@ -2540,6 +2647,14 @@ function setupEventListeners() {
             
             // Get current settings from UI and track what was newly enabled
             const previouslyEnabledProviders = { ...settings.enabledProviders };
+            
+            // Get theme setting
+            const themeSelect = document.getElementById('theme-select');
+            if (themeSelect) {
+                globalSettings.theme = themeSelect.value;
+                settings.theme = themeSelect.value; // Update legacy settings object
+                applyTheme(themeSelect.value);
+            }
             
             const maxWordCountInput = document.getElementById('max-word-count');
             if (maxWordCountInput) {

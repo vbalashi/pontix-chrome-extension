@@ -548,9 +548,10 @@ async function saveUserSettings(settings, password = null) {
         
         console.log('🔐 saveUserSettings - encryptedKeys type:', typeof encryptedKeys);
 
-        // REFACTORED: Only store global settings (API keys and enabled providers)
+        // REFACTORED: Only store global settings (API keys, enabled providers, and theme)
         const settingsData = {
             user_id: user.id,
+            theme: settings.theme || 'system',
             enabled_providers: settings.enabledProviders,
             api_keys: encryptedKeys,
             updated_at: new Date().toISOString()
