@@ -1,0 +1,6 @@
+(?d).git
+(?d)node_modules/
+(?d).venv
+(?d)*/.venv
+(?d)build/
+(?d)dist/

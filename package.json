@@ -4,13 +4,14 @@
   "description": "Chrome extension for translation with multiple providers and cloud sync",
   "main": "src/scripts/background.js",
   "scripts": {
+    "setup": "echo 'Setting up development environment...' && npm install && echo 'Please create .env file from .env.example and configure your Supabase credentials'",
     "build": "node build-supabase.js",
     "repackage": "chmod +x build-extension.sh && ./build-extension.sh",
     "package": "npm run build && npm run repackage",
     "clean": "rm -rf build/ dist/*.zip dist/*.tar.gz .build/",
     "dev": "npm run build && npm run package",
     "test": "jest",
-    "setup": "cp .env.example .env && echo 'Please edit .env file with your Supabase credentials'"
+    "postinstall": "echo '\n🎉 Dependencies installed successfully!\n📝 Next steps:\n  1. Copy .env.example to .env\n  2. Configure your Supabase credentials\n  3. Run: npm run dev\n'"
   },
   "keywords": [
     "chrome-extension",
