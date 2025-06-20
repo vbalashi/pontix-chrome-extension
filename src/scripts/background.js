@@ -1,59 +1,3 @@
-// Track sidebar state
-let sidebarEnabled = false;
-
-// Check if tab is in Edge immersive reader mode
-function isEdgeImmersiveReaderTab(url) {
-    return url && (
-        url.includes('read.microsoft.com') || 
-        url.includes('immersive-reader.microsoft') ||
-        url.includes('edge://read')
-    );
-}
-
-// Inject content script if not already present
-async function ensureContentScriptInjected(tabId) {
-    try {
-        // Try to ping the content script
-        const response = await chrome.tabs.sendMessage(tabId, { action: "ping" });
-        if (response && response.pong) {
-            return true; // Content script already present
-        }
-    } catch (error) {
-        // Content script not present, inject it
-        console.log("Injecting content script...");
-        
-        try {
-            await chrome.scripting.executeScript({
-                target: { tabId: tabId, allFrames: true },
-                files: ['content.js']
-            });
-            
-            // Wait a moment for script to initialize
-            await new Promise(resolve => setTimeout(resolve, 100));
-            return true;
-        } catch (injectionError) {
-            console.error("Failed to inject content script:", injectionError);
-            return false;
-        }
-    }
-    return false;
-}
-
-// Safe message sending with content script injection
-async function safelyMessageTab(tabId, message) {
-    const injected = await ensureContentScriptInjected(tabId);
-    
-    if (injected) {
-        try {
-            await chrome.tabs.sendMessage(tabId, message);
-        } catch (error) {
-            console.error("Error sending message:", error);
-        }
-    } else {
-        console.error("Could not inject content script");
-    }
-}
-
 // Translation API handlers
 async function translateWithDeepL(word, sentence, targetLang, apiKey) {
     try {
@@ -176,57 +120,56 @@ function getLanguageName(langCode) {
     return languageNames[langCode] || langCode;
 }
 
-// Track Edge immersive reader tabs
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    // Only act when the tab is fully loaded
-    if (changeInfo.status === 'complete') {
-        // Check if this is an Edge immersive reader page
-        if (tab.url && isEdgeImmersiveReaderTab(tab.url)) {
-            console.log("Edge immersive reader detected");
-            
-            // If sidebar was enabled, ensure it stays enabled in immersive mode
-            if (sidebarEnabled) {
-                // Wait a moment for immersive reader to fully initialize
-                setTimeout(() => {
-                    safelyMessageTab(tabId, { 
-                        action: "toggleSidebar", 
-                        enabled: sidebarEnabled,
-                        isImmersiveMode: true 
-                    });
-                }, 1500);
-            }
-        }
-    }
+// Initialize side panel when extension starts
+chrome.runtime.onInstalled.addListener(() => {
+    console.log("Pontix extension installed/updated");
+    
+    // Enable side panel to open when action icon is clicked
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
+        .then(() => {
+            console.log("Side panel behavior set: openPanelOnActionClick = true");
+        })
+        .catch((error) => {
+            console.error("Failed to set side panel behavior:", error);
+        });
 });
 
-// Listen for extension icon clicks
-chrome.action.onClicked.addListener(async (tab) => {
-    // Toggle sidebar state
-    sidebarEnabled = !sidebarEnabled;
-    
-    // Set badge based on state (visual feedback)
-    if (sidebarEnabled) {
-        chrome.action.setBadgeText({ text: "ON" });
-        chrome.action.setBadgeBackgroundColor({ color: "#4285F4" });
-    } else {
-        chrome.action.setBadgeText({ text: "" });
-    }
-    
-    // Check if we're in Edge immersive reader mode
-    const isImmersiveMode = isEdgeImmersiveReaderTab(tab.url);
-    
-    // Inject content script and send the state
-    await safelyMessageTab(tab.id, { 
-        action: "toggleSidebar", 
-        enabled: sidebarEnabled,
-        isImmersiveMode: isImmersiveMode
-    });
-});
-
-// Handle content script ping messages and translation requests
+// Handle messages from content script and side panel
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === "ping") {
-        sendResponse({ pong: true });
+    console.log("Background received message:", request);
+    
+    // Handle content script loaded notification
+    if (request.action === "contentScriptLoaded") {
+        console.log("Content script loaded on tab:", sender.tab?.id);
+        sendResponse({ success: true });
+        return true;
+    }
+    
+    // Handle text selection from content script - forward to side panel
+    if (request.action === 'textSelected' && request.source === 'translatorContentScript') {
+        console.log("Forwarding text selection to side panel:", request.selectedText);
+        
+        // Use storage to communicate with side panel
+        try {
+            chrome.storage.local.set({
+                'sidePanel_textSelected': {
+                    action: 'textSelected',
+                    selectedText: request.selectedText,
+                    sentence: request.sentence,
+                    error: request.error,
+                    timestamp: Date.now(), // Add timestamp to ensure fresh data
+                    source: 'backgroundScript'
+                }
+            }).then(() => {
+                console.log("Text selection stored for side panel");
+            }).catch(error => {
+                console.error("Failed to store text selection:", error);
+            });
+        } catch (error) {
+            console.error("Storage error:", error);
+        }
+        
+        sendResponse({ success: true });
         return true;
     }
     
@@ -262,18 +205,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true; // Keep message channel open for async response
     }
 
-    // Broadcast updated settings to all tabs
+    // Broadcast updated settings to all tabs with content script
     if (request.action === "updateSettings") {
         (async () => {
             try {
                 const tabs = await chrome.tabs.query({});
+                let successCount = 0;
+                
                 for (const tab of tabs) {
-                    await safelyMessageTab(tab.id, {
-                        action: "updateSettings",
-                        settings: request.settings
-                    });
+                    try {
+                        await chrome.tabs.sendMessage(tab.id, {
+                            action: "updateSettings",
+                            settings: request.settings
+                        });
+                        successCount++;
+                    } catch (error) {
+                        // Ignore tabs without content script
+                        console.log(`Could not send settings to tab ${tab.id}:`, error.message);
+                    }
                 }
-                sendResponse({ success: true });
+                
+                console.log(`Settings broadcast to ${successCount} tabs`);
+                sendResponse({ success: true, tabsUpdated: successCount });
             } catch (error) {
                 console.error('Settings broadcast error:', error);
                 sendResponse({ success: false });
@@ -283,4 +236,4 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     
     return true;
-});
+}); 

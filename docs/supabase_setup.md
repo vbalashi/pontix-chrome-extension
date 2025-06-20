@@ -38,6 +38,7 @@ CREATE TABLE user_profiles (
 CREATE TABLE user_settings (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE UNIQUE,
+    theme VARCHAR(20) DEFAULT 'system',
     max_word_count INTEGER DEFAULT 25,
     default_target_language VARCHAR(10) DEFAULT 'ru',
     layout_mode VARCHAR(20) DEFAULT 'overlay',
@@ -163,6 +164,7 @@ The `npm run build` command will read these variables and generate
 
 ### user_settings table:
 - Stores global settings that apply across all profiles
+- theme: UI theme preference ('system', 'light', or 'dark')
 - max_word_count: Maximum words to translate
 - default_target_language: Default language code
 - layout_mode: Sidebar layout mode (`overlay` or `shift`)
@@ -203,3 +205,12 @@ After completing this setup:
 4. Test the integration
 
 Keep your Project URL and API key secure - you'll need them for the extension integration. 
+
+### Migration for Existing Databases
+
+If you already have a database without the theme column, run this migration:
+
+```sql
+-- Add theme column to existing user_settings table
+ALTER TABLE user_settings ADD COLUMN theme VARCHAR(20) DEFAULT 'system';
+``` 

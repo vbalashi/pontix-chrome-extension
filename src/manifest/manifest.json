@@ -6,7 +6,8 @@
   "permissions": [
     "activeTab",
     "storage",
-    "scripting"
+    "scripting",
+    "sidePanel"
   ],
   "host_permissions": [
     "https://translate.googleapis.com/*",
@@ -24,31 +25,23 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "action": {
-    "default_title": "Pontix",
-    "default_icon": {
-      "16": "icons/pontix_icon_16.png",
-      "48": "icons/pontix_icon_48.png",
-      "128": "icons/pontix_icon_128.png"
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end",
+      "all_frames": true
     }
+  ],
+  "action": {
+    "default_title": "Open Pontix Side Panel"
   },
   "icons": {
     "16": "icons/pontix_icon_16.png",
     "48": "icons/pontix_icon_48.png",
     "128": "icons/pontix_icon_128.png"
   },
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "sidebar.html",
-        "sidebar.css",
-        "sidebar.js",
-        "supabase-client.js",
-        "supabase.js"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
-    }
-  ]
+  "side_panel": {
+    "default_path": "html/sidebar.html"
+  }
 }

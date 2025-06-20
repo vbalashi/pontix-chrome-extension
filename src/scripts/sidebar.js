@@ -370,7 +370,7 @@ const languageNames = {
 
 // Debounce variables for translation requests
 let translationDebounceTimer = null;
-const TRANSLATION_DEBOUNCE_DELAY = 500; // 500ms delay after last selection change
+const TRANSLATION_DEBOUNCE_DELAY = 800; // Increased from 500ms to 800ms for better user experience
 
 // Debounced version of translateAllBoxes to prevent rapid-fire requests
 function debouncedTranslateAllBoxes() {
@@ -2281,6 +2281,22 @@ function initializeSidebar() {
             }
         }
         
+        // Check for any existing text selection in storage on startup
+        setTimeout(() => {
+            try {
+                chrome.storage.local.get('sidePanel_textSelected', (result) => {
+                    if (result.sidePanel_textSelected) {
+                        console.log('🔍 Found existing text selection on startup:', result.sidePanel_textSelected);
+                        handleBackgroundScriptMessage(result.sidePanel_textSelected, null, () => {});
+                        // Clean up after processing
+                        chrome.storage.local.remove('sidePanel_textSelected').catch(console.error);
+                    }
+                });
+            } catch (error) {
+                console.error('Error checking for existing text selection:', error);
+            }
+        }, 100);
+        
         console.log('=== SIDEBAR INITIALIZATION COMPLETE ===');
     } catch (error) {
         console.error('=== SIDEBAR INITIALIZATION FAILED ===');
@@ -3158,73 +3174,87 @@ function setupEventListeners() {
         });
     }
     
-    // Listen for messages from content script
-    window.addEventListener('message', handleContentScriptMessage);
+    // Listen for messages from background script via storage (this actually works for side panels)
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+        if (namespace === 'local' && changes['sidePanel_textSelected']) {
+            const newValue = changes['sidePanel_textSelected'].newValue;
+            if (newValue) {
+                console.log('🔍 Sidebar received storage update:', newValue);
+                handleBackgroundScriptMessage(newValue, null, () => {});
+                
+                // Clean up the storage to prevent re-processing
+                chrome.storage.local.remove('sidePanel_textSelected').catch(console.error);
+            }
+        }
+    });
+    
+    // Keep the runtime message listener for other types of messages (settings, etc.)
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        // Handle non-textSelected messages here if needed
+        if (message.action !== 'textSelected') {
+            handleBackgroundScriptMessage(message, sender, sendResponse);
+            return true;
+        }
+        // For textSelected messages, we use storage instead
+        return false;
+    });
     
     console.log('SetupEventListeners: All event listeners set up successfully');
 }
 
-// Handle messages from content script
-function handleContentScriptMessage(event) {
-    console.log('🔍 Sidebar received message:', event);
-    console.log('🔍 Message origin:', event.origin);
-    console.log('🔍 Window location origin:', window.location.origin);
-    console.log('🔍 Message data:', event.data);
+// Handle messages from background script (forwarded from content script)
+function handleBackgroundScriptMessage(message, sender, sendResponse) {
+    console.log('🔍 Sidebar received message from background:', message);
     
-    const data = event.data;
-    if (!data || data.source !== 'translatorContentScript') {
-        console.log('🚫 Message rejected due to invalid source or no data:', data);
+    const data = message;
+    if (!data) {
+        console.log('🚫 Message rejected due to no data:', data);
+        sendResponse({ success: false, error: 'No data' });
         return;
     }
     
-    // Skip origin verification for extension sidebar - we only check the source property
-    // since the sidebar should accept messages from any webpage where the extension is active
-    console.log('✅ Received valid message from content script:', data);
-    
-    switch (data.type) {
-        case 'textSelected':
-            console.log('📝 Processing textSelected message');
-            currentWord = data.selectedText || '';
-            currentSentence = data.sentence || '';
-            
-            console.log('📝 Updated currentWord:', currentWord);
-            console.log('📝 Updated currentSentence:', currentSentence);
-            
-            // Update UI
-            if (selectionElement) {
+    // Check if this is a forwarded message from the background script
+    if (data.source === 'backgroundScript' && data.action === 'textSelected') {
+        console.log('✅ Received text selection from background script:', data);
+        
+        currentWord = data.selectedText || '';
+        currentSentence = data.sentence || '';
+        
+        console.log('📝 Updated currentWord:', currentWord);
+        console.log('📝 Updated currentSentence:', currentSentence);
+        
+        // Update UI
+        if (selectionElement) {
+            if (data.error) {
+                selectionElement.textContent = data.error;
+            } else {
                 selectionElement.textContent = currentWord || 'Select text to translate';
-                console.log('✅ Updated selection element');
-            } else {
-                console.log('❌ Selection element not found');
             }
-            
-            if (sentenceElement) {
-                sentenceElement.textContent = currentSentence;
-                console.log('✅ Updated sentence element');
-            } else {
-                console.log('❌ Sentence element not found');
-            }
-            
-            // Trigger translation with debouncing
-            if (currentWord) {
-                console.log('🎯 Triggering translation for:', currentWord);
-                debouncedTranslateAllBoxes();
-            }
-            break;
-            
-        case 'selectionCleared':
-            console.log('🧹 Processing selectionCleared message');
-            currentWord = '';
-            currentSentence = '';
-            
-            if (selectionElement) {
-                selectionElement.textContent = 'Select text to translate';
-            }
-            if (sentenceElement) {
-                sentenceElement.textContent = '';
-            }
-            break;
+            console.log('✅ Updated selection element');
+        } else {
+            console.log('❌ Selection element not found');
+        }
+        
+        if (sentenceElement) {
+            sentenceElement.textContent = currentSentence || '';
+            console.log('✅ Updated sentence element');
+        } else {
+            console.log('❌ Sentence element not found');
+        }
+        
+        // Trigger translation with debouncing if we have text and no error
+        if (currentWord && !data.error) {
+            console.log('🎯 Triggering translation for:', currentWord);
+            debouncedTranslateAllBoxes();
+        }
+        
+        sendResponse({ success: true });
+        return;
     }
+    
+    // Handle other message types as needed
+    console.log('🤔 Unhandled message type:', data);
+    sendResponse({ success: false, error: 'Unhandled message type' });
 }
 
 // Translate all visible translation boxes
@@ -5030,3 +5060,5 @@ function showSecurityMessage(message, type) {
         }, 5000);
     }
 }
+
+

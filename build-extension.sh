@@ -1,63 +1,58 @@
 #!/bin/bash
 
-# Chrome Extension Build Script
-echo "🔧 Building Chrome Extension..."
+echo "🔄 Building Pontix Chrome Extension..."
 
-# Create build directory
-rm -rf build/
-mkdir -p build/
+# Create build directory structure
+rm -rf build
+mkdir -p build
+mkdir -p build/html
+mkdir -p build/styles
+mkdir -p build/icons
 
-# Copy essential files from src directory
-echo "📁 Copying essential files..."
+echo "📁 Created build directory structure"
+
+# Copy manifest
 cp src/manifest/manifest.json build/
-cp src/scripts/background.js build/
+echo "✅ Copied manifest.json"
+
+# Copy HTML files
+cp src/html/* build/html/
+echo "✅ Copied HTML files"
+
+# Copy CSS files
+cp src/styles/* build/styles/
+echo "✅ Copied CSS files"
+
+# Copy icons
+cp icons/* build/icons/
+echo "✅ Copied icons"
+
+# Copy scripts to build root (for side panel access)
 cp src/scripts/content.js build/
-cp src/html/sidebar.html build/
-cp src/styles/sidebar.css build/
+cp src/scripts/background.js build/
 cp src/scripts/sidebar.js build/
+echo "✅ Copied script files to build root"
 
-# Copy the generated supabase-client.js (from .build directory)
-if [ -f ".build/supabase-client.js" ]; then
-    cp .build/supabase-client.js build/
-    echo "✅ Generated Supabase client included"
-else
-    echo "⚠️  supabase-client.js not found in .build/ - run 'npm run build' first"
-fi
-
-# Copy the bundled Supabase library (from .build directory)
+# Copy Supabase files from .build directory to build root (if they exist)
 if [ -f ".build/supabase.js" ]; then
     cp .build/supabase.js build/
-    echo "✅ Bundled Supabase library included"
+    echo "✅ Copied supabase.js"
 else
-    echo "⚠️  supabase.js not found in .build/ - run 'npm run build' first"
+    echo "⚠️  supabase.js not found - run npm run build:supabase first"
 fi
 
-# Copy icons directory
-if [ -d "icons" ]; then
-    cp -r icons build/
-    echo "✅ Icons directory copied"
+if [ -f ".build/supabase-client.js" ]; then
+    cp .build/supabase-client.js build/
+    echo "✅ Copied supabase-client.js"
 else
-    echo "⚠️  Icons directory not found"
+    echo "⚠️  supabase-client.js not found - run npm run build:supabase first"
 fi
 
-echo "✅ Extension built successfully in build/ directory"
-echo "📊 Build size:"
-du -sh build/
-
-# Create distribution zip automatically
+echo "🎉 Build complete! Extension files are in ./build/"
 echo ""
-echo "📦 Creating distribution package..."
-mkdir -p dist/
-cd build/
-zip -r ../dist/pontix-extension.zip . > /dev/null
-cd ..
-echo "✅ Created dist/pontix-extension.zip"
-
+echo "📋 To install:"
+echo "1. Open Chrome and go to chrome://extensions/"
+echo "2. Enable 'Developer mode'"
+echo "3. Click 'Load unpacked' and select the ./build/ folder"
 echo ""
-echo "🚀 Ready to load in Chrome Developer Mode:"
-echo "   1. Open Chrome Extensions (chrome://extensions/)"
-echo "   2. Enable Developer Mode"
-echo "   3. Click 'Load unpacked' and select the 'build' directory"
-echo ""
-echo "📤 Ready for Chrome Web Store:"
-echo "   Upload: dist/pontix-extension.zip" 
+echo "💡 Remember to run 'npm run build:supabase' if you need cloud sync features" 

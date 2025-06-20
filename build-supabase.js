@@ -73,18 +73,26 @@ try {
     }
     
     // Update manifest to include the bundled library
-    const manifestPath = path.join(__dirname, 'src', 'manifest', 'manifest.json');
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-    
-    // Add supabase.js to web accessible resources if not already there
-    const resources = manifest.web_accessible_resources[0].resources;
-    if (!resources.includes('supabase.js')) {
-        resources.push('supabase.js');
-        fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-        console.log('✅ Updated manifest.json to include supabase.js');
-    }
+    // (Removed: no longer needed for native side panel)
+    // const manifestPath = path.join(__dirname, 'src', 'manifest', 'manifest.json');
+    // const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    // const resources = manifest.web_accessible_resources[0].resources;
+    // if (!resources.includes('supabase.js')) {
+    //     resources.push('supabase.js');
+    //     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+    //     console.log('✅ Updated manifest.json to include supabase.js');
+    // }
     
     console.log('🎉 Build complete! Generated files saved to .build/ directory');
+    
+    console.log('✅ Supabase client created successfully!');
+    console.log('📄 File created:', destPath);
+    console.log('📦 Ready for extension build');
+    
+    console.log('\n🚨 DATABASE MIGRATION NOTICE:');
+    console.log('If you have an existing Supabase database, you may need to run this migration:');
+    console.log('ALTER TABLE user_settings ADD COLUMN theme VARCHAR(20) DEFAULT \'system\';');
+    console.log('See docs/supabase_setup.md for more information.');
     
 } catch (error) {
     console.error('❌ Build failed:', error.message);
