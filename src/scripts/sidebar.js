@@ -487,12 +487,20 @@ async function checkAuthStatus() {
                 await syncFromSupabase();
                 window.lastSuccessfulSync = Date.now();
                 window.lastSyncedUserId = currentUserId;
+                console.log('🔐 ✅ Cloud sync completed successfully');
             } catch (syncError) {
                 console.warn('🔐 Failed to sync after auth check, but auth is valid:', syncError);
                 // Don't fail the auth check just because sync failed
             }
         } else {
             console.log('🔐 Skipping sync - recently synced for same user');
+            // Still ensure current profile is loaded properly
+            if (currentProfileName && profiles[currentProfileName]) {
+                console.log('🔐 Ensuring current profile is loaded:', currentProfileName);
+                profileSettings = JSON.parse(JSON.stringify(profiles[currentProfileName]));
+                settings = { ...profileSettings, ...globalSettings };
+                restoreTranslationBoxes();
+            }
         }
         } else {
             console.log('🔐 User not authenticated');
@@ -1374,14 +1382,21 @@ async function syncFromSupabase() {
             const mergedProfiles = { ...profiles };
             let hasProfileUpdates = false;
             
-            // Add cloud profiles that don't exist locally
+            // Add cloud profiles that don't exist locally OR update existing profiles with cloud data if it's newer
             for (const profileName in cloudProfiles) {
                 if (!mergedProfiles[profileName]) {
                     mergedProfiles[profileName] = cloudProfiles[profileName];
                     console.log(`🔄 Added cloud profile: ${profileName}`);
                     hasProfileUpdates = true;
                 } else {
-                    console.log(`🔄 Kept local profile: ${profileName}`);
+                    // CRITICAL FIX: Merge existing profiles by taking cloud data
+                    // since cloud represents the latest saved state
+                    console.log(`🔄 Updating local profile '${profileName}' with cloud data`);
+                    mergedProfiles[profileName] = { 
+                        ...mergedProfiles[profileName], 
+                        ...cloudProfiles[profileName] 
+                    };
+                    hasProfileUpdates = true;
                 }
             }
             
@@ -1414,6 +1429,20 @@ async function syncFromSupabase() {
         updateSettingsUI();
         updateProfileDropdown();
         updateProfilesList();
+        
+        // CRITICAL FIX: Load the current profile's data after syncing from cloud
+        if (currentProfileName && profiles[currentProfileName]) {
+            console.log('🔄 Loading current profile data after cloud sync:', currentProfileName);
+            // Update profileSettings with the current profile's data
+            profileSettings = JSON.parse(JSON.stringify(profiles[currentProfileName]));
+            // Update legacy settings object for backward compatibility
+            settings = {
+                ...profileSettings,
+                ...globalSettings
+            };
+            console.log('🔄 Updated settings with current profile translation boxes:', settings.translationBoxes);
+        }
+        
         restoreTranslationBoxes();
         
         // Apply theme after syncing from cloud
@@ -1717,6 +1746,7 @@ function loadProfile(profileName, saveCurrentFirst = true) {
     };
     
     console.log('LoadProfile: Loaded profile settings for:', profileName);
+    console.log('LoadProfile: Translation boxes in loaded profile:', profileSettings.translationBoxes);
     
     // Update UI
     updateSettingsUI();
@@ -2035,15 +2065,20 @@ function forceRefreshAllProviderDropdowns() {
 // Debug function to inspect current state (call from console)
 function debugTranslator() {
     console.log('=== TRANSLATOR DEBUG INFO ===');
-    console.log('Current settings:', settings);
+    console.log('Auth status:', { isAuthenticated, syncEnabled, currentUser: currentUser?.email });
     console.log('Current profile:', currentProfileName);
     console.log('Available profiles:', Object.keys(profiles));
+    console.log('Profile settings (current):', profileSettings);
+    console.log('Global settings:', globalSettings);
+    console.log('Legacy settings object:', settings);
+    console.log('Translation boxes in current profile:', profiles[currentProfileName]?.translationBoxes);
     console.log('Translation boxes in DOM:', translationsContainer ? translationsContainer.children.length : 'Container not found');
     
     if (translationsContainer) {
         console.log('DOM boxes:', Array.from(translationsContainer.children).map(box => ({
             provider: box.getAttribute('data-provider'),
-            language: box.querySelector('.language-select')?.value
+            language: box.querySelector('.language-select')?.value,
+            model: box.querySelector('.model-select')?.value
         })));
     }
     
@@ -2444,7 +2479,7 @@ function saveSettings() {
 // Save current translation boxes layout
 function saveTranslationBoxesLayout() {
     const boxes = document.querySelectorAll('.translation-box');
-    settings.translationBoxes = [];
+    const translationBoxes = [];
     
     console.log('SaveTranslationBoxesLayout: Found', boxes.length, 'boxes to save');
     
@@ -2469,7 +2504,7 @@ function saveTranslationBoxesLayout() {
             boxConfig.model = model;
         }
         
-        settings.translationBoxes.push(boxConfig);
+        translationBoxes.push(boxConfig);
         
         console.log(`SaveTranslationBoxesLayout: Box ${index + 1}:`, {
             provider,
@@ -2478,7 +2513,16 @@ function saveTranslationBoxesLayout() {
         });
     });
     
-    console.log('SaveTranslationBoxesLayout: Final saved layout:', settings.translationBoxes);
+    console.log('SaveTranslationBoxesLayout: Final saved layout:', translationBoxes);
+    
+    // CRITICAL FIX: Save translation boxes to profile settings, not global settings
+    profileSettings.translationBoxes = translationBoxes;
+    
+    // Update legacy settings object for backward compatibility
+    settings = {
+        ...profileSettings,
+        ...globalSettings
+    };
     
     // Save to chrome storage
     saveSettings();

@@ -1,5 +1,5 @@
 # This directory is a Syncthing folder marker.
 # Do not delete.
 
-folderID: cuwxn-vucca
-created: 2025-06-20T21:25:13Z
+folderID: 6u9rg-mpptx
+created: 2025-06-20T22:39:51Z
