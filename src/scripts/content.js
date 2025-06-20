@@ -195,6 +195,19 @@ if (window.translatorExtensionLoaded) {
                     }
                 }
             }
+
+            // Expand selection to include complete words
+            if (selectedText && selection.rangeCount > 0) {
+                try {
+                    const expandedText = expandToCompleteWords(selection, selectedText);
+                    if (expandedText && expandedText !== selectedText) {
+                        console.log("🔍 Expanded selection from:", selectedText, "to:", expandedText);
+                        selectedText = expandedText;
+                    }
+                } catch (e) {
+                    console.log("Word expansion failed, using original selection:", e);
+                }
+            }
             
             // Skip if no selection or same as last selection
             if (!selectedText || selectedText === lastSelection) {
@@ -230,6 +243,92 @@ if (window.translatorExtensionLoaded) {
             sendToSidePanel(selectedText, sentence);
         } catch (error) {
             console.error("Error processing selection:", error);
+        }
+    }
+    
+    // Expand partial word selections to include complete words
+    function expandToCompleteWords(selection, originalText) {
+        try {
+            if (!selection || selection.rangeCount === 0) {
+                return originalText;
+            }
+
+            const range = selection.getRangeAt(0);
+            const container = range.commonAncestorContainer;
+            
+            // Get the full text content
+            let fullText = '';
+            let textNode = null;
+            
+            if (container.nodeType === Node.TEXT_NODE) {
+                fullText = container.textContent || '';
+                textNode = container;
+            } else {
+                // Find the text node containing our selection
+                const walker = document.createTreeWalker(
+                    container,
+                    NodeFilter.SHOW_TEXT,
+                    null,
+                    false
+                );
+                
+                let node;
+                while (node = walker.nextNode()) {
+                    const nodeText = node.textContent || '';
+                    if (nodeText.includes(originalText)) {
+                        fullText = nodeText;
+                        textNode = node;
+                        break;
+                    }
+                }
+                
+                // Fallback: use container's text content
+                if (!fullText) {
+                    fullText = container.textContent || '';
+                }
+            }
+
+            if (!fullText || !originalText) {
+                return originalText;
+            }
+
+            // Find the position of the original selection in the full text
+            const selectionIndex = fullText.indexOf(originalText);
+            if (selectionIndex === -1) {
+                return originalText;
+            }
+
+            // Define word boundary characters (non-word characters)
+            const wordBoundaryRegex = /[^\w\u00C0-\u024F\u1E00-\u1EFF\u0400-\u04FF\u0100-\u017F]/;
+            
+            // Find the start of the word by going backwards
+            let wordStart = selectionIndex;
+            while (wordStart > 0 && !wordBoundaryRegex.test(fullText[wordStart - 1])) {
+                wordStart--;
+            }
+
+            // Find the end of the word by going forwards
+            let wordEnd = selectionIndex + originalText.length;
+            while (wordEnd < fullText.length && !wordBoundaryRegex.test(fullText[wordEnd])) {
+                wordEnd++;
+            }
+
+            // Extract the expanded text
+            const expandedText = fullText.substring(wordStart, wordEnd).trim();
+            
+            // Only return expanded text if it's actually different and reasonable
+            if (expandedText && 
+                expandedText !== originalText && 
+                expandedText.length > originalText.length &&
+                expandedText.length <= originalText.length + 50) { // Prevent excessive expansion
+                
+                return expandedText;
+            }
+
+            return originalText;
+        } catch (error) {
+            console.error("Error expanding to complete words:", error);
+            return originalText;
         }
     }
     
