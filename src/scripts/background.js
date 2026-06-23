@@ -5,6 +5,7 @@ import {
     redactForLog,
     validateInternalMessage,
 } from './security.js';
+import { createSelectionSourceBinding } from './sourceBinding.js';
 
 const SELECTION_STORAGE_KEY = 'sidePanel_textSelected';
 let latestSelectionSnapshot = null;
@@ -168,8 +169,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // Handle text selection from content script - forward to side panel
     if (validation.action === 'textSelected' && request.source === 'translatorContentScript') {
         safeLog("Forwarding bounded text selection to side panel", senderSummary(sender));
-        
-        storeSelectionSnapshot(boundedSelectionSnapshot(request, sender))
+
+        const snapshot = boundedSelectionSnapshot(request, sender);
+        const binding = createSelectionSourceBinding({
+            url: request.pageUrl || sender.tab?.url || sender.url || '',
+            title: request.pageTitle || sender.tab?.title || '',
+            languageCode: request.languageCode || '',
+            selectedText: snapshot.selectedText,
+            containerText: request.containerText || snapshot.sentence || snapshot.selectedText,
+            rangeStart: Number.isInteger(request.rangeStart) ? request.rangeStart : undefined,
+            rangeEnd: Number.isInteger(request.rangeEnd) ? request.rangeEnd : undefined,
+            navigationId: request.navigationId || `${sender.tab?.id || 'tab'}:${sender.documentId || sender.url || ''}`,
+            tabId: snapshot.tabId,
+            frameId: snapshot.frameId,
+            capturedAt: new Date(snapshot.createdAt).toISOString(),
+        });
+        if (binding.ok) {
+            snapshot.sourceBinding = binding.binding;
+        } else {
+            snapshot.sourceBindingError = binding.error;
+        }
+
+        storeSelectionSnapshot(snapshot)
             .catch((error) => safeError("Failed to store ephemeral selection", error));
         
         sendResponse({ success: true });

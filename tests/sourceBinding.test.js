@@ -103,6 +103,7 @@ test('frozen action envelope preserves id and excludes raw context text', () => 
 
     expect(Object.isFrozen(envelope)).toBe(true);
     expect(envelope.clientEventId).toBe('22222222-2222-4222-8222-222222222222');
+    expect(JSON.stringify(created.binding)).not.toContain('Een woord in context');
     expect(envelope.sourceContext.selection).toEqual({
         clickedForm: 'woord',
         contextTextHash: expect.stringMatching(/^pontix-fnv1a-/),

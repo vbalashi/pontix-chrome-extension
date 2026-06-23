@@ -101,7 +101,6 @@ function captureRangeLocator(params = {}) {
         ok: true,
         locator: {
             selectedText,
-            contextText,
             selectionHash: hashText(selectedText),
             contextHash: hashText(contextText),
             charStart: inferredStart - contextStart,

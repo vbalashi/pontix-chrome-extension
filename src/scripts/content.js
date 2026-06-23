@@ -231,16 +231,17 @@ if (window.translatorExtensionLoaded) {
             
             // Extract sentence context
             const sentence = extractSentence(selectedText, selection);
+            const locator = captureSelectionLocator(selection, selectedText);
             
             console.log("📝 Text selected:", {
-                selectedText: selectedText,
+                selectedTextLength: selectedText.length,
                 wordCount: wordCount,
-                sentence: sentence ? sentence.substring(0, 100) + "..." : "",
+                sentenceLength: sentence ? sentence.length : 0,
                 hostname: window.location.hostname
             });
             
             // Send to side panel
-            sendToSidePanel(selectedText, sentence);
+            sendToSidePanel(selectedText, sentence, null, locator);
         } catch (error) {
             console.error("Error processing selection:", error);
         }
@@ -333,7 +334,39 @@ if (window.translatorExtensionLoaded) {
     }
     
     // Send selection data to side panel via background script
-    function sendToSidePanel(selectedText, sentence, error = null) {
+    function captureSelectionLocator(selection, selectedText) {
+        try {
+            if (!selection || selection.rangeCount === 0) return {};
+            const range = selection.getRangeAt(0);
+            const container = range.commonAncestorContainer;
+            const root = container.nodeType === Node.TEXT_NODE ? container.parentNode : container;
+            const containerText = (root?.textContent || container.textContent || '').replace(/\s+/g, ' ').trim();
+            if (!containerText) return {};
+
+            const preRange = range.cloneRange();
+            preRange.selectNodeContents(root);
+            preRange.setEnd(range.startContainer, range.startOffset);
+            const rawStart = preRange.toString().replace(/\s+/g, ' ').trim().length;
+            const normalizedSelection = String(selectedText || '').replace(/\s+/g, ' ').trim();
+            let rangeStart = rawStart;
+            if (normalizedSelection && containerText.slice(rawStart, rawStart + normalizedSelection.length) !== normalizedSelection) {
+                const nearbyStart = Math.max(0, rawStart - 80);
+                const nearby = containerText.indexOf(normalizedSelection, nearbyStart);
+                rangeStart = nearby >= 0 ? nearby : containerText.indexOf(normalizedSelection);
+            }
+            if (rangeStart < 0) return { containerText };
+            return {
+                containerText,
+                rangeStart,
+                rangeEnd: rangeStart + normalizedSelection.length,
+            };
+        } catch (error) {
+            console.error("Error capturing selection locator:", error);
+            return {};
+        }
+    }
+
+    function sendToSidePanel(selectedText, sentence, error = null, locator = {}) {
         try {
             if (!chrome || !chrome.runtime) {
                 console.error("Chrome runtime not available");
@@ -341,8 +374,8 @@ if (window.translatorExtensionLoaded) {
             }
             
             console.log('🚀 Content script sending to background:', {
-                selectedText: selectedText,
-                sentence: sentence ? sentence.substring(0, 50) + '...' : '',
+                selectedTextLength: selectedText ? selectedText.length : 0,
+                sentenceLength: sentence ? sentence.length : 0,
                 error: error,
                 hostname: window.location.hostname
             });
@@ -353,6 +386,13 @@ if (window.translatorExtensionLoaded) {
                 sentence: sentence,
                 error: error,
                 hostname: window.location.hostname,
+                pageUrl: window.location.href,
+                pageTitle: document.title || '',
+                languageCode: document.documentElement.lang || '',
+                navigationId: `${window.location.origin}${window.location.pathname}:${performance.timeOrigin || Date.now()}`,
+                containerText: locator.containerText || '',
+                rangeStart: locator.rangeStart,
+                rangeEnd: locator.rangeEnd,
                 source: 'translatorContentScript'
             }).catch(e => {
                 console.error("Error sending message to background script:", e);
