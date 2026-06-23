@@ -67,6 +67,20 @@ the service-worker boundary during migration.
   before use.
 - Production logs redact secrets and content-bearing fields.
 
+## Source Binding Contract
+
+`src/scripts/sourceBinding.js` owns the client-side privacy contract for future
+2000NL provenance. It can classify `web_page`, `text_document`, and supported
+`ebook` selections, normalize URL observations, build hash-based bounded
+selection locators, invalidate bindings across navigation/tab/frame changes, and
+freeze one explicit action envelope.
+
+Live content-script wiring is intentionally separate from this module while
+`src/scripts/content.js` has unrelated local selection-timing changes. When that
+file is ready, the content script should pass real `Range` offsets and bounded
+context into this module through the service worker instead of using
+`containerText.indexOf(selectedText)`.
+
 ## External Dependencies
 
 Production extension paths use bundled code. Runtime remote-code/CDN loading is

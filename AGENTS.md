@@ -46,6 +46,7 @@ For narrow JS syntax checks during extension work:
 node --check src/scripts/background.js
 node --check src/scripts/sidebar.js
 node --check src/scripts/security.js
+node --check src/scripts/sourceBinding.js
 ```
 
 If `src/scripts/content.js` already has unrelated local edits, do not reformat
