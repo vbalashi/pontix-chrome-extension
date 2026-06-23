@@ -8,25 +8,32 @@ if (window.translatorExtensionLoaded) {
 
     // Configuration
     let maxWordCount = 25; // Default maximum word count for translation
-    
+
     // Selection tracking variables
     let lastSelection = "";
     let selectionTimeout = null;
     let isMouseDown = false; // Track mouse state
     let mouseUpTimeout = null; // Additional timeout for mouse release
-    
+    let doubleClickTimeout = null; // Track double-click events
+    let lastClickTime = 0; // Track timing between clicks
+    let lastMouseUpTime = 0; // Track mouse up timing
+    let lastProcessedTime = 0; // Track when we last processed a selection
+    const DOUBLE_CLICK_DELAY = 400; // Maximum time between clicks to consider it a double-click
+    const SELECTION_DELAY = 500; // Delay after mouse release to allow for selection expansion
+    const MIN_PROCESS_INTERVAL = 100; // Minimum time between processing selections
+
     // Initialize extension
     function initializeExtension() {
         console.log("🚀 Initializing Pontix content script...");
-        
+
         try {
             loadExtensionSettings();
             setupSelectionHandlers();
-            
+
             // Test if chrome.runtime is available
             if (chrome && chrome.runtime) {
                 // Notify background script
-                chrome.runtime.sendMessage({ 
+                chrome.runtime.sendMessage({
                     action: "contentScriptLoaded",
                     hostname: window.location.hostname,
                     url: window.location.href
@@ -34,13 +41,13 @@ if (window.translatorExtensionLoaded) {
                     console.log("Note: Could not notify background script (extension might be reloading):", e.message);
                 });
             }
-            
+
             console.log("✅ Pontix content script initialized successfully");
         } catch (error) {
             console.error("❌ Error initializing Pontix content script:", error);
         }
     }
-    
+
     // Load extension settings from storage
     function loadExtensionSettings() {
         try {
@@ -50,7 +57,7 @@ if (window.translatorExtensionLoaded) {
                         console.log("Storage error:", chrome.runtime.lastError);
                         return;
                     }
-                    
+
                     if (result.translatorSettings) {
                         if (result.translatorSettings.maxWordCount) {
                             maxWordCount = result.translatorSettings.maxWordCount;
@@ -65,59 +72,95 @@ if (window.translatorExtensionLoaded) {
             console.log("Note: Could not load settings:", e.message);
         }
     }
-    
+
     // Setup selection handlers
     function setupSelectionHandlers() {
         console.log("🎯 Setting up selection handlers for side panel");
-        
+
         try {
             // Track mouse state to ensure we wait for button release
             document.addEventListener('mousedown', () => {
                 isMouseDown = true;
                 console.log("🖱️ Mouse down detected");
             }, { passive: true });
-            
-            document.addEventListener('mouseup', () => {
+
+            document.addEventListener('mouseup', (event) => {
                 isMouseDown = false;
+                const currentTime = Date.now();
+
                 console.log("🖱️ Mouse up detected");
-                // Add a small delay after mouse up to ensure selection is complete
-                if (mouseUpTimeout) clearTimeout(mouseUpTimeout);
-                mouseUpTimeout = setTimeout(() => {
-                    handleSelectionChange();
-                }, 100); // Wait 100ms after mouse release
+
+                // Check if this is potentially part of a double-click
+                const timeSinceLastClick = currentTime - lastClickTime;
+                const isDoubleClick = timeSinceLastClick < DOUBLE_CLICK_DELAY;
+
+                lastClickTime = currentTime;
+                lastMouseUpTime = currentTime;
+
+                if (isDoubleClick) {
+                    console.log("🖱️ Double-click detected, extending delay to allow for selection expansion");
+                    // Clear any existing timeouts
+                    if (mouseUpTimeout) clearTimeout(mouseUpTimeout);
+                    if (doubleClickTimeout) clearTimeout(doubleClickTimeout);
+
+                    // Set a longer timeout for double-clicks to allow user to expand selection
+                    doubleClickTimeout = setTimeout(() => {
+                        handleSelectionChange();
+                        doubleClickTimeout = null;
+                    }, SELECTION_DELAY);
+                } else {
+                    // Single click - use shorter delay
+                    if (mouseUpTimeout) clearTimeout(mouseUpTimeout);
+                    mouseUpTimeout = setTimeout(() => {
+                        // Check if enough time has passed since last mouse up
+                        // This prevents rapid fire selections during text expansion
+                        const timeSinceMouseUp = Date.now() - lastMouseUpTime;
+                        if (timeSinceMouseUp >= 200) {
+                            handleSelectionChange();
+                        }
+                    }, 200);
+                }
             }, { passive: true });
-            
-            // Handle text selection with multiple event types for better compatibility
-            document.addEventListener('mouseup', handleSelectionChange, { passive: true });
+
+            // Remove the duplicate mouseup listener to avoid double processing
+            // document.addEventListener('mouseup', handleSelectionChange, { passive: true });
+
+            // Keep other event types for compatibility
             document.addEventListener('touchend', handleSelectionChange, { passive: true });
             document.addEventListener('keyup', handleSelectionChange, { passive: true });
-            
-            // Use passive listener for selectionchange to avoid conflicts
-            document.addEventListener('selectionchange', debounce(handleSelectionChange, 300), { passive: true });
-            
+
+            // Use passive listener for selectionchange with longer debounce to work well with our new logic
+            document.addEventListener('selectionchange', debounce(handleSelectionChange, 400), { passive: true });
+
             // Add specific handling for sites that use shadow DOM or custom selection
             // Check for Shadow DOM elements
-            if (document.querySelector('[data-reactroot]') || 
-                document.querySelector('[data-testid]') || 
+            if (document.querySelector('[data-reactroot]') ||
+                document.querySelector('[data-testid]') ||
                 window.location.hostname.includes('amazon.com')) {
                 console.log("🔍 Detected special site, adding enhanced selection detection");
-                
+
                 // Add capture phase listeners for better compatibility with React/Amazon sites
-                document.addEventListener('mouseup', handleSelectionChange, { capture: true, passive: true });
-                document.addEventListener('selectionchange', debounce(handleSelectionChange, 200), { capture: true, passive: true });
-                
+                // But avoid duplicate mouseup handling by using a flag
+                document.addEventListener('mouseup', (event) => {
+                    // Only handle if the main mouseup handler hasn't processed this in the last 50ms
+                    if (Date.now() - lastMouseUpTime > 50) {
+                        handleSelectionChange();
+                    }
+                }, { capture: true, passive: true });
+
+                document.addEventListener('selectionchange', debounce(handleSelectionChange, 300), { capture: true, passive: true });
+
                 // Also listen on document body for sites that intercept events
                 if (document.body) {
-                    document.body.addEventListener('mouseup', handleSelectionChange, { passive: true });
                     document.body.addEventListener('touchend', handleSelectionChange, { passive: true });
                 }
             }
-            
+
             console.log("✅ Selection event listeners added");
         } catch (error) {
             console.error("❌ Error setting up selection handlers:", error);
         }
-        
+
         // Listen for settings updates
         if (chrome && chrome.runtime && chrome.runtime.onMessage) {
             chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -137,7 +180,7 @@ if (window.translatorExtensionLoaded) {
             });
         }
     }
-    
+
     // Handle selection changes
     function handleSelectionChange() {
         try {
@@ -146,33 +189,39 @@ if (window.translatorExtensionLoaded) {
                 console.log("⏸️ Mouse still down, waiting for release...");
                 return;
             }
-            
-            // Clear any existing timeout
+
+            // Clear any existing timeout to prevent multiple rapid calls
             if (selectionTimeout) {
                 clearTimeout(selectionTimeout);
             }
-            
-            // Set new timeout to process selection after user stops selecting
-            // Increased timeout to ensure mouse button is fully released
+
+            // Use a shorter timeout since we now have better upstream timing control
             selectionTimeout = setTimeout(() => {
                 processSelection();
-            }, 300); // Increased from 200ms to 300ms for better reliability
+            }, 150); // Reduced from 300ms since we have better control upstream
         } catch (error) {
             console.error("Error in handleSelectionChange:", error);
         }
     }
-    
+
     // Process the current selection
     function processSelection() {
         try {
+            // Prevent rapid duplicate processing
+            const currentTime = Date.now();
+            if (currentTime - lastProcessedTime < MIN_PROCESS_INTERVAL) {
+                console.log("⏸️ Skipping duplicate selection processing (too soon after last processing)");
+                return;
+            }
+
             const selection = window.getSelection();
             if (!selection) {
                 console.log("No selection object available");
                 return;
             }
-            
+
             let selectedText = selection.toString().trim();
-            
+
             // Fallback for sites that don't properly expose selection
             if (!selectedText && selection.rangeCount > 0) {
                 try {
@@ -182,7 +231,7 @@ if (window.translatorExtensionLoaded) {
                     console.log("Range selection extraction failed:", e);
                 }
             }
-            
+
             // Additional fallback for Amazon and similar sites
             if (!selectedText) {
                 // Try to get selected text from any focused element
@@ -208,7 +257,7 @@ if (window.translatorExtensionLoaded) {
                     console.log("Word expansion failed, using original selection:", e);
                 }
             }
-            
+
             // Skip if no selection or same as last selection
             if (!selectedText || selectedText === lastSelection) {
                 if (!selectedText && lastSelection) {
@@ -218,9 +267,11 @@ if (window.translatorExtensionLoaded) {
                 }
                 return;
             }
-            
+
+            // Update tracking variables
             lastSelection = selectedText;
-            
+            lastProcessedTime = currentTime;
+
             // Check word count limit
             const wordCount = selectedText.split(/\s+/).length;
             if (wordCount > maxWordCount) {
@@ -228,25 +279,25 @@ if (window.translatorExtensionLoaded) {
                 sendToSidePanel("", "", `Selection too long (${wordCount}/${maxWordCount} words)`);
                 return;
             }
-            
+
             // Extract sentence context
             const sentence = extractSentence(selectedText, selection);
             const locator = captureSelectionLocator(selection, selectedText);
-            
+
             console.log("📝 Text selected:", {
                 selectedTextLength: selectedText.length,
                 wordCount: wordCount,
                 sentenceLength: sentence ? sentence.length : 0,
                 hostname: window.location.hostname
             });
-            
+
             // Send to side panel
             sendToSidePanel(selectedText, sentence, null, locator);
         } catch (error) {
             console.error("Error processing selection:", error);
         }
     }
-    
+
     // Expand partial word selections to include complete words
     function expandToCompleteWords(selection, originalText) {
         try {
@@ -256,11 +307,11 @@ if (window.translatorExtensionLoaded) {
 
             const range = selection.getRangeAt(0);
             const container = range.commonAncestorContainer;
-            
+
             // Get the full text content
             let fullText = '';
             let textNode = null;
-            
+
             if (container.nodeType === Node.TEXT_NODE) {
                 fullText = container.textContent || '';
                 textNode = container;
@@ -272,7 +323,7 @@ if (window.translatorExtensionLoaded) {
                     null,
                     false
                 );
-                
+
                 let node;
                 while (node = walker.nextNode()) {
                     const nodeText = node.textContent || '';
@@ -282,7 +333,7 @@ if (window.translatorExtensionLoaded) {
                         break;
                     }
                 }
-                
+
                 // Fallback: use container's text content
                 if (!fullText) {
                     fullText = container.textContent || '';
@@ -301,7 +352,7 @@ if (window.translatorExtensionLoaded) {
 
             // Define word boundary characters (non-word characters)
             const wordBoundaryRegex = /[^\w\u00C0-\u024F\u1E00-\u1EFF\u0400-\u04FF\u0100-\u017F]/;
-            
+
             // Find the start of the word by going backwards
             let wordStart = selectionIndex;
             while (wordStart > 0 && !wordBoundaryRegex.test(fullText[wordStart - 1])) {
@@ -316,13 +367,13 @@ if (window.translatorExtensionLoaded) {
 
             // Extract the expanded text
             const expandedText = fullText.substring(wordStart, wordEnd).trim();
-            
+
             // Only return expanded text if it's actually different and reasonable
-            if (expandedText && 
-                expandedText !== originalText && 
+            if (expandedText &&
+                expandedText !== originalText &&
                 expandedText.length > originalText.length &&
                 expandedText.length <= originalText.length + 50) { // Prevent excessive expansion
-                
+
                 return expandedText;
             }
 
@@ -332,7 +383,7 @@ if (window.translatorExtensionLoaded) {
             return originalText;
         }
     }
-    
+
     // Send selection data to side panel via background script
     function captureSelectionLocator(selection, selectedText) {
         try {
@@ -372,14 +423,14 @@ if (window.translatorExtensionLoaded) {
                 console.error("Chrome runtime not available");
                 return;
             }
-            
+
             console.log('🚀 Content script sending to background:', {
                 selectedTextLength: selectedText ? selectedText.length : 0,
                 sentenceLength: sentence ? sentence.length : 0,
                 error: error,
                 hostname: window.location.hostname
             });
-            
+
             chrome.runtime.sendMessage({
                 action: 'textSelected',
                 selectedText: selectedText,
@@ -401,17 +452,17 @@ if (window.translatorExtensionLoaded) {
             console.error("Error sending message to side panel:", e);
         }
     }
-    
+
     // Extract sentence context from selection
     function extractSentence(selectedText, selection) {
         try {
             if (!selection || selection.rangeCount === 0) {
                 return selectedText;
             }
-            
+
             const range = selection.getRangeAt(0);
             const container = range.commonAncestorContainer;
-            
+
             // Get the text content of the container
             let containerText = '';
             if (container.nodeType === Node.TEXT_NODE) {
@@ -419,13 +470,13 @@ if (window.translatorExtensionLoaded) {
             } else {
                 containerText = container.textContent || '';
             }
-            
+
             // Find the selected text within the container
             const selectedIndex = containerText.indexOf(selectedText);
             if (selectedIndex === -1) {
                 return selectedText;
             }
-            
+
             // Extract surrounding sentence
             return extractSentenceFromText(containerText, selectedText, selectedIndex);
         } catch (error) {
@@ -433,17 +484,17 @@ if (window.translatorExtensionLoaded) {
             return selectedText;
         }
     }
-    
+
     // Extract sentence from full text
     function extractSentenceFromText(fullText, selectedText, selectionIndex) {
         try {
             // Define sentence-ending punctuation
             const sentenceEnders = /[.!?]+/g;
-            
+
             // Find sentence boundaries
             let start = 0;
             let end = fullText.length;
-            
+
             // Look backwards for sentence start
             for (let i = selectionIndex - 1; i >= 0; i--) {
                 if (sentenceEnders.test(fullText[i])) {
@@ -451,7 +502,7 @@ if (window.translatorExtensionLoaded) {
                     break;
                 }
             }
-            
+
             // Look forwards for sentence end
             for (let i = selectionIndex + selectedText.length; i < fullText.length; i++) {
                 if (sentenceEnders.test(fullText[i])) {
@@ -459,25 +510,25 @@ if (window.translatorExtensionLoaded) {
                     break;
                 }
             }
-            
+
             // Extract and clean the sentence
             let sentence = fullText.substring(start, end).trim();
-            
+
             // Clean up extra whitespace
             sentence = sentence.replace(/\s+/g, ' ');
-            
+
             // Limit sentence length
             if (sentence.length > 500) {
                 sentence = sentence.substring(0, 500) + '...';
             }
-            
+
             return sentence || selectedText;
         } catch (error) {
             console.error("Error extracting sentence from text:", error);
             return selectedText;
         }
     }
-    
+
     // Debounce function
     function debounce(func, wait) {
         let timeout;
@@ -490,7 +541,7 @@ if (window.translatorExtensionLoaded) {
             timeout = setTimeout(later, wait);
         };
     }
-    
+
     // Initialize when DOM is ready
     try {
         if (document.readyState === 'loading') {
@@ -504,4 +555,4 @@ if (window.translatorExtensionLoaded) {
         // Fallback - try to initialize anyway
         setTimeout(initializeExtension, 100);
     }
-} 
+}
