@@ -28,9 +28,7 @@ cp icons/* build/icons/
 echo "✅ Copied icons"
 
 # Copy scripts to build root (for side panel access)
-cp src/scripts/content.js build/
-cp src/scripts/background.js build/
-cp src/scripts/sidebar.js build/
+cp src/scripts/*.js build/
 echo "✅ Copied script files to build root"
 
 # Copy Supabase files from .build directory to build root (if they exist)
@@ -55,4 +53,4 @@ echo "1. Open Chrome and go to chrome://extensions/"
 echo "2. Enable 'Developer mode'"
 echo "3. Click 'Load unpacked' and select the ./build/ folder"
 echo ""
-echo "💡 Remember to run 'npm run build:supabase' if you need cloud sync features" 
+echo "💡 Remember to run 'npm run build:supabase' if you need cloud sync features"

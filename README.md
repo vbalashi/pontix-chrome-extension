@@ -142,6 +142,16 @@ Books reader pages:
 - ✅ Validated before build process
 - ✅ Template system prevents credential exposure
 
+**Extension Runtime Baseline**:
+- `AGENTS.md` and `ARCHITECTURE.md` define source ownership and safe-change
+  boundaries.
+- Selected page text is transported through ephemeral extension session storage
+  and consumed by the side panel; it is not persisted in sync/local storage.
+- Provider API keys are local-only secrets and are not written to
+  `chrome.storage.sync`.
+- Pontix Supabase auth is separate from the future 2000NL Connected Client
+  identity.
+
 ## 📦 Distribution
 
 Built packages are stored in `dist/` directory:
@@ -157,4 +167,4 @@ Built packages are stored in `dist/` directory:
 
 ## 📄 License
 
-ISC License - see package.json for details. 
+ISC License - see package.json for details.

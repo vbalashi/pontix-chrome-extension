@@ -54,7 +54,7 @@ TESTING_GUIDE.md
 
 # Development and testing files
 test-security.js
-*.test.js
+/*.test.js
 *.spec.js
 
 # IDE files

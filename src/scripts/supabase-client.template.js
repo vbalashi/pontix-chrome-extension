@@ -37,8 +37,8 @@ let isLocalMode = false;
 let isLoadingSupabase = false;
 let supabaseLoadAttempted = false;
 
-// Dynamically load Supabase from CDN
-async function loadSupabaseFromCDN() {
+// Use bundled Supabase only. Production extension paths must not load remote code.
+async function loadBundledSupabase() {
     if (typeof supabase !== 'undefined') {
         console.log('🔐 Supabase already loaded');
         return true;
@@ -56,43 +56,10 @@ async function loadSupabaseFromCDN() {
     
     isLoadingSupabase = true;
     supabaseLoadAttempted = true;
-    
-    try {
-        console.log('🔄 Loading Supabase library from CDN...');
-        
-        // Create script element to load Supabase
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.0/dist/umd/supabase.min.js';
-        script.crossOrigin = 'anonymous';
-        
-        // Wait for script to load
-        await new Promise((resolve, reject) => {
-            script.onload = () => {
-                console.log('✅ Supabase library loaded successfully');
-                resolve();
-            };
-            script.onerror = () => {
-                console.error('❌ Failed to load Supabase library');
-                reject(new Error('Failed to load Supabase'));
-            };
-            document.head.appendChild(script);
-        });
-        
-        // Verify Supabase is available
-        if (typeof supabase !== 'undefined') {
-            isLocalMode = false;
-            isLoadingSupabase = false;
-            return true;
-        } else {
-            throw new Error('Supabase object not available after loading');
-        }
-        
-    } catch (error) {
-        console.error('🔐 Failed to load Supabase:', error);
-        isLocalMode = true;
-        isLoadingSupabase = false;
-        return false;
-    }
+    console.warn('🔐 Bundled Supabase library is unavailable. Running in local-only mode.');
+    isLocalMode = true;
+    isLoadingSupabase = false;
+    return false;
 }
 
 // Initialize the Supabase client
@@ -181,7 +148,7 @@ async function enableCloudSync() {
     try {
         console.log('🔄 Enabling cloud sync...');
         
-        const loaded = await loadSupabaseFromCDN();
+        const loaded = await loadBundledSupabase();
         if (loaded) {
             const client = initializeSupabase();
             if (client) {
@@ -1027,7 +994,7 @@ window.SupabaseAuth = {
     getSupabaseClient,
     isInLocalMode,
     enableCloudSync,
-    loadSupabaseFromCDN,
+    loadBundledSupabase,
     signUp,
     signIn,
     signOut,
@@ -1055,4 +1022,4 @@ if (document.readyState === 'loading') {
 } else {
     console.log('🔄 Supabase auth functions exposed to window.SupabaseAuth (DOM ready)');
     initializeSupabase();
-} 
+}

@@ -113,6 +113,8 @@ let syncRetryCount = 0;
 const MAX_SYNC_RETRIES = 3;
 const SYNC_COOLDOWN_MS = 5000; // 5 seconds between sync attempts
 const SYNC_RETRY_DELAY = [1000, 2000, 5000]; // Exponential backoff delays
+const SELECTION_STORAGE_KEY = 'sidePanel_textSelected';
+const SECRET_STORAGE_KEY = 'translatorSecrets';
 
 // OTP state management
 let otpEmail = '';
@@ -2316,20 +2318,11 @@ function initializeSidebar() {
             }
         }
         
-        // Check for any existing text selection in storage on startup
+        // Check for an ephemeral text selection on startup
         setTimeout(() => {
-            try {
-                chrome.storage.local.get('sidePanel_textSelected', (result) => {
-                    if (result.sidePanel_textSelected) {
-                        console.log('🔍 Found existing text selection on startup:', result.sidePanel_textSelected);
-                        handleBackgroundScriptMessage(result.sidePanel_textSelected, null, () => {});
-                        // Clean up after processing
-                        chrome.storage.local.remove('sidePanel_textSelected').catch(console.error);
-                    }
-                });
-            } catch (error) {
+            consumeEphemeralSelection().catch((error) => {
                 console.error('Error checking for existing text selection:', error);
-            }
+            });
         }, 100);
         
         console.log('=== SIDEBAR INITIALIZATION COMPLETE ===');
@@ -2362,7 +2355,7 @@ function loadSettings() {
     }
     
     try {
-        // Load both user settings and dynamic data separately
+        // Load non-secret user settings from sync and provider secrets from local storage.
         chrome.storage.sync.get(["translatorSettings", "translatorDynamicData"], (result) => {
             console.log('LoadSettings: Storage query result:', result);
             
@@ -2386,10 +2379,7 @@ function loadSettings() {
                         ...settings.enabledProviders,
                         ...(result.translatorSettings.enabledProviders || {})
                     },
-                    apiKeys: {
-                        ...settings.apiKeys,
-                        ...(result.translatorSettings.apiKeys || {})
-                    }
+                    apiKeys: { ...settings.apiKeys }
                 };
                 
                 // Update global settings with theme if present
@@ -2429,8 +2419,15 @@ function loadSettings() {
                 console.log('LoadSettings: No saved dynamic data found, using defaults');
             }
             
-            // Update UI (restoreTranslationBoxes will be called by loadProfiles)
-            updateSettingsUI();
+            chrome.storage.local.get([SECRET_STORAGE_KEY], (secretResult) => {
+                const secrets = secretResult?.[SECRET_STORAGE_KEY] || {};
+                settings.apiKeys = {
+                    ...settings.apiKeys,
+                    ...(secrets.apiKeys || {})
+                };
+                globalSettings.apiKeys = { ...settings.apiKeys };
+                updateSettingsUI();
+            });
         });
     } catch (error) {
         console.error('LoadSettings: Error accessing chrome.storage:', error);
@@ -2443,7 +2440,7 @@ function loadSettings() {
 // Save settings to storage
 function saveSettings() {
     console.log('SaveSettings: Attempting to save settings...');
-    console.log('SaveSettings: Current settings:', settings);
+    console.log('SaveSettings: Current settings:', redactSettingsForLog(settings));
     
     // Check if Chrome APIs are available
     if (typeof chrome === 'undefined' || !chrome.storage) {
@@ -2452,27 +2449,66 @@ function saveSettings() {
     }
     
     try {
-        // Save user settings and dynamic data separately to avoid quota issues
-        chrome.storage.sync.set({
-            "translatorSettings": settings,
-            "translatorDynamicData": dynamicData
-        }, () => {
+        const syncedSettings = settingsWithoutSecrets(settings);
+        const localSecrets = {
+            apiKeys: { ...(settings.apiKeys || {}) },
+            updatedAt: Date.now()
+        };
+
+        chrome.storage.local.set({ [SECRET_STORAGE_KEY]: localSecrets }, () => {
             if (chrome.runtime.lastError) {
-                console.error('SaveSettings: Error saving settings:', chrome.runtime.lastError);
-            } else {
-                console.log('SaveSettings: Settings and dynamic data saved successfully');
-                try {
-                    chrome.runtime.sendMessage({
-                        action: 'updateSettings',
-                        settings: settings
-                    });
-                } catch (e) {
-                    console.error('SaveSettings: Failed to send update message:', e);
-                }
+                console.error('SaveSettings: Error saving local secrets:', chrome.runtime.lastError);
+                return;
             }
+            chrome.storage.sync.set({
+                "translatorSettings": syncedSettings,
+                "translatorDynamicData": dynamicData
+            }, () => {
+                if (chrome.runtime.lastError) {
+                    console.error('SaveSettings: Error saving settings:', chrome.runtime.lastError);
+                } else {
+                    console.log('SaveSettings: Settings and dynamic data saved successfully');
+                    try {
+                        chrome.runtime.sendMessage({
+                            action: 'updateSettings',
+                            settings: syncedSettings
+                        });
+                    } catch (e) {
+                        console.error('SaveSettings: Failed to send update message:', e);
+                    }
+                }
+            });
         });
     } catch (error) {
         console.error('SaveSettings: Error accessing chrome.storage:', error);
+    }
+}
+
+function settingsWithoutSecrets(value) {
+    const sanitized = { ...value };
+    delete sanitized.apiKeys;
+    return sanitized;
+}
+
+function redactSettingsForLog(value) {
+    return {
+        ...value,
+        apiKeys: Object.fromEntries(
+            Object.keys(value?.apiKeys || {}).map((provider) => [provider, value.apiKeys[provider] ? '[configured]' : ''])
+        )
+    };
+}
+
+async function consumeEphemeralSelection() {
+    if (!chrome?.runtime?.sendMessage) return;
+    const response = await chrome.runtime.sendMessage({
+        version: 1,
+        action: 'consumeSelectionSnapshot',
+        requestId: `sidebar-${Date.now()}`
+    });
+    if (response?.success && response.selection) {
+        console.log('🔍 Found ephemeral text selection on startup');
+        handleBackgroundScriptMessage(response.selection, null, () => {});
     }
 }
 
@@ -3218,16 +3254,15 @@ function setupEventListeners() {
         });
     }
     
-    // Listen for messages from background script via storage (this actually works for side panels)
+    // Listen for ephemeral messages from background script via session storage.
     chrome.storage.onChanged.addListener((changes, namespace) => {
-        if (namespace === 'local' && changes['sidePanel_textSelected']) {
-            const newValue = changes['sidePanel_textSelected'].newValue;
+        if (namespace === 'session' && changes[SELECTION_STORAGE_KEY]) {
+            const newValue = changes[SELECTION_STORAGE_KEY].newValue;
             if (newValue) {
-                console.log('🔍 Sidebar received storage update:', newValue);
+                console.log('🔍 Sidebar received ephemeral selection update');
                 handleBackgroundScriptMessage(newValue, null, () => {});
                 
-                // Clean up the storage to prevent re-processing
-                chrome.storage.local.remove('sidePanel_textSelected').catch(console.error);
+                chrome.storage.session.remove(SELECTION_STORAGE_KEY).catch(console.error);
             }
         }
     });
@@ -4716,149 +4751,15 @@ async function promptForPassword() {
 
 // Password storage helpers
 async function storeUserPassword(password) {
-    if (!password) return;
-    
-    try {
-        // Get current session to use as encryption key
-        const { data: { session } } = await window.SupabaseAuth.getCurrentSession();
-        if (!session?.access_token) {
-            console.warn('🔐 No session available, cannot store password securely');
-            return;
-        }
-        
-        // Use first 32 chars of access token as encryption key
-        const sessionKey = session.access_token.substring(0, 32);
-        const encoder = new TextEncoder();
-        const decoder = new TextDecoder();
-        
-        // Encrypt password with session key
-        const keyMaterial = await crypto.subtle.importKey(
-            'raw',
-            encoder.encode(sessionKey),
-            'PBKDF2',
-            false,
-            ['deriveKey']
-        );
-        
-        const salt = crypto.getRandomValues(new Uint8Array(16));
-        const encryptionKey = await crypto.subtle.deriveKey(
-            {
-                name: 'PBKDF2',
-                salt: salt,
-                iterations: 1000,
-                hash: 'SHA-256'
-            },
-            keyMaterial,
-            { name: 'AES-GCM', length: 256 },
-            false,
-            ['encrypt']
-        );
-        
-        const iv = crypto.getRandomValues(new Uint8Array(12));
-        const encrypted = await crypto.subtle.encrypt(
-            { name: 'AES-GCM', iv: iv },
-            encryptionKey,
-            encoder.encode(password)
-        );
-        
-        // Store encrypted password with salt and iv
-        const encryptedData = {
-            encrypted: Array.from(new Uint8Array(encrypted)),
-            salt: Array.from(salt),
-            iv: Array.from(iv),
-            userId: session.user?.id
-        };
-        
-        chrome.storage.local.set({ 'encrypted_user_password': encryptedData }, () => {
-            console.log('🔐 Password stored securely');
-        });
-        
-    } catch (error) {
-        console.error('🔐 Failed to store password:', error);
+    if (password) {
+        console.warn('🔐 Password persistence is disabled by the Pontix security baseline');
     }
+    clearStoredPassword();
 }
 
 async function retrieveUserPassword() {
-    try {
-        // Get current session
-        const { data: { session } } = await window.SupabaseAuth.getCurrentSession();
-        if (!session?.access_token) {
-            console.log('🔐 No session available, cannot retrieve password');
-            return null;
-        }
-        
-        // Get encrypted password from storage
-        return new Promise((resolve) => {
-            chrome.storage.local.get(['encrypted_user_password'], async (result) => {
-                try {
-                    const encryptedData = result.encrypted_user_password;
-                    if (!encryptedData) {
-                        console.log('🔐 No stored password found');
-                        resolve(null);
-                        return;
-                    }
-                    
-                    // Check if password belongs to current user
-                    if (encryptedData.userId !== session.user?.id) {
-                        console.log('🔐 Stored password belongs to different user, clearing');
-                        chrome.storage.local.remove(['encrypted_user_password']);
-                        resolve(null);
-                        return;
-                    }
-                    
-                    // Use same session key for decryption
-                    const sessionKey = session.access_token.substring(0, 32);
-                    const encoder = new TextEncoder();
-                    const decoder = new TextDecoder();
-                    
-                    const keyMaterial = await crypto.subtle.importKey(
-                        'raw',
-                        encoder.encode(sessionKey),
-                        'PBKDF2',
-                        false,
-                        ['deriveKey']
-                    );
-                    
-                    const salt = new Uint8Array(encryptedData.salt);
-                    const decryptionKey = await crypto.subtle.deriveKey(
-                        {
-                            name: 'PBKDF2',
-                            salt: salt,
-                            iterations: 1000,
-                            hash: 'SHA-256'
-                        },
-                        keyMaterial,
-                        { name: 'AES-GCM', length: 256 },
-                        false,
-                        ['decrypt']
-                    );
-                    
-                    const iv = new Uint8Array(encryptedData.iv);
-                    const encrypted = new Uint8Array(encryptedData.encrypted);
-                    
-                    const decrypted = await crypto.subtle.decrypt(
-                        { name: 'AES-GCM', iv: iv },
-                        decryptionKey,
-                        encrypted
-                    );
-                    
-                    const password = decoder.decode(decrypted);
-                    console.log('🔐 Password retrieved successfully');
-                    resolve(password);
-                    
-                } catch (error) {
-                    console.error('🔐 Failed to decrypt password:', error);
-                    // Clear corrupted data
-                    chrome.storage.local.remove(['encrypted_user_password']);
-                    resolve(null);
-                }
-            });
-        });
-        
-    } catch (error) {
-        console.error('🔐 Failed to retrieve password:', error);
-        return null;
-    }
+    clearStoredPassword();
+    return null;
 }
 
 function clearStoredPassword() {
@@ -5104,5 +5005,4 @@ function showSecurityMessage(message, type) {
         }, 5000);
     }
 }
-
 

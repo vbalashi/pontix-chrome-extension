@@ -1,3 +1,17 @@
+import {
+    PONTIX_SECRET_STORAGE_KEYS,
+    boundedSelectionSnapshot,
+    isSelectionFresh,
+    redactForLog,
+    validateInternalMessage,
+} from './security.js';
+
+const SELECTION_STORAGE_KEY = 'sidePanel_textSelected';
+let latestSelectionSnapshot = null;
+
+restrictTrustedStorageAccess();
+cleanupLegacySecrets();
+
 // Translation API handlers
 async function translateWithDeepL(word, sentence, targetLang, apiKey) {
     try {
@@ -122,12 +136,12 @@ function getLanguageName(langCode) {
 
 // Initialize side panel when extension starts
 chrome.runtime.onInstalled.addListener(() => {
-    console.log("Pontix extension installed/updated");
+    safeLog("Pontix extension installed/updated");
     
     // Enable side panel to open when action icon is clicked
     chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
         .then(() => {
-            console.log("Side panel behavior set: openPanelOnActionClick = true");
+            safeLog("Side panel behavior set: openPanelOnActionClick = true");
         })
         .catch((error) => {
             console.error("Failed to set side panel behavior:", error);
@@ -136,45 +150,44 @@ chrome.runtime.onInstalled.addListener(() => {
 
 // Handle messages from content script and side panel
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log("Background received message:", request);
+    const validation = validateInternalMessage(request, sender, chrome.runtime.id);
+    if (!validation.ok) {
+        safeWarn("Rejected runtime message", { error: validation.error, action: request?.action || request?.type });
+        sendResponse({ success: false, error: validation.error });
+        return true;
+    }
+    safeLog("Background received message", { action: validation.action, sender: senderSummary(sender) });
     
     // Handle content script loaded notification
-    if (request.action === "contentScriptLoaded") {
-        console.log("Content script loaded on tab:", sender.tab?.id);
+    if (validation.action === "contentScriptLoaded") {
+        safeLog("Content script loaded", { tabId: sender.tab?.id });
         sendResponse({ success: true });
         return true;
     }
     
     // Handle text selection from content script - forward to side panel
-    if (request.action === 'textSelected' && request.source === 'translatorContentScript') {
-        console.log("Forwarding text selection to side panel:", request.selectedText);
+    if (validation.action === 'textSelected' && request.source === 'translatorContentScript') {
+        safeLog("Forwarding bounded text selection to side panel", senderSummary(sender));
         
-        // Use storage to communicate with side panel
-        try {
-            chrome.storage.local.set({
-                'sidePanel_textSelected': {
-                    action: 'textSelected',
-                    selectedText: request.selectedText,
-                    sentence: request.sentence,
-                    error: request.error,
-                    timestamp: Date.now(), // Add timestamp to ensure fresh data
-                    source: 'backgroundScript'
-                }
-            }).then(() => {
-                console.log("Text selection stored for side panel");
-            }).catch(error => {
-                console.error("Failed to store text selection:", error);
-            });
-        } catch (error) {
-            console.error("Storage error:", error);
-        }
+        storeSelectionSnapshot(boundedSelectionSnapshot(request, sender))
+            .catch((error) => safeError("Failed to store ephemeral selection", error));
         
         sendResponse({ success: true });
         return true;
     }
+
+    if (validation.action === 'consumeSelectionSnapshot') {
+        consumeSelectionSnapshot()
+            .then((snapshot) => sendResponse({ success: true, selection: snapshot }))
+            .catch((error) => {
+                safeError("Failed to consume selection snapshot", error);
+                sendResponse({ success: false, error: 'selection_consume_failed' });
+            });
+        return true;
+    }
     
     // Handle translation requests from sidebar
-    if (request.action === "translate") {
+    if (validation.action === "translate") {
         (async () => {
             try {
                 let result;
@@ -206,7 +219,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     // Broadcast updated settings to all tabs with content script
-    if (request.action === "updateSettings") {
+    if (validation.action === "updateSettings") {
         (async () => {
             try {
                 const tabs = await chrome.tabs.query({});
@@ -221,11 +234,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         successCount++;
                     } catch (error) {
                         // Ignore tabs without content script
-                        console.log(`Could not send settings to tab ${tab.id}:`, error.message);
+                        safeLog("Could not send settings to tab", { tabId: tab.id, error: error.message });
                     }
                 }
                 
-                console.log(`Settings broadcast to ${successCount} tabs`);
+                safeLog("Settings broadcast", { tabsUpdated: successCount });
                 sendResponse({ success: true, tabsUpdated: successCount });
             } catch (error) {
                 console.error('Settings broadcast error:', error);
@@ -236,4 +249,65 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     
     return true;
-}); 
+});
+
+async function storeSelectionSnapshot(snapshot) {
+    latestSelectionSnapshot = snapshot;
+    if (chrome.storage?.session) {
+        await chrome.storage.session.set({ [SELECTION_STORAGE_KEY]: snapshot });
+    }
+}
+
+async function consumeSelectionSnapshot() {
+    let snapshot = latestSelectionSnapshot;
+    if (chrome.storage?.session) {
+        const result = await chrome.storage.session.get(SELECTION_STORAGE_KEY);
+        snapshot = result?.[SELECTION_STORAGE_KEY] || snapshot;
+        await chrome.storage.session.remove(SELECTION_STORAGE_KEY);
+    }
+    latestSelectionSnapshot = null;
+    return isSelectionFresh(snapshot) ? snapshot : null;
+}
+
+function restrictTrustedStorageAccess() {
+    if (!chrome.storage?.local?.setAccessLevel) return;
+    chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }, () => {
+        if (chrome.runtime.lastError) {
+            safeWarn("Failed to restrict local storage access", chrome.runtime.lastError.message);
+        }
+    });
+}
+
+function cleanupLegacySecrets() {
+    if (!chrome.storage?.local?.remove) return;
+    chrome.storage.local.remove(PONTIX_SECRET_STORAGE_KEYS.filter((key) => key === 'encrypted_user_password'));
+}
+
+function senderSummary(sender) {
+    return {
+        id: sender?.id || '',
+        tabId: sender?.tab?.id,
+        frameId: sender?.frameId,
+        origin: sender?.origin || '',
+    };
+}
+
+function safeLog(message, data = null) {
+    if (data === null) {
+        console.log(message);
+    } else {
+        console.log(message, redactForLog(data));
+    }
+}
+
+function safeWarn(message, data = null) {
+    if (data === null) {
+        console.warn(message);
+    } else {
+        console.warn(message, redactForLog(data));
+    }
+}
+
+function safeError(message, error) {
+    console.error(message, error?.message || String(error));
+}
