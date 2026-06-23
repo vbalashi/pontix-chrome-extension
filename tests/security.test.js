@@ -54,3 +54,15 @@ test('2000nl bearer attachment is allowlisted', () => {
     expect(shouldAttach2000NlBearer('https://audiofilms-api.dilum.io/api/platform/v1/session')).toBe(false);
     expect(shouldAttach2000NlBearer('https://2000.dilum.io/anything')).toBe(false);
 });
+
+test('2000nl service worker commands are explicit allowlisted messages', () => {
+    for (const action of [
+        'connect2000nl',
+        'disconnect2000nl',
+        'get2000nlSession',
+        'platformLookup',
+        'platformAction',
+    ]) {
+        expect(validateInternalMessage({ action }, { id: 'ext' }, 'ext')).toEqual({ ok: true, action });
+    }
+});

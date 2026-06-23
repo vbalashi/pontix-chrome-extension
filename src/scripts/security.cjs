@@ -66,6 +66,10 @@ function validateInternalMessage(message = {}, sender = {}, runtimeId = '') {
         'translate',
         'updateSettings',
         'consumeSelectionSnapshot',
+        'connect2000nl',
+        'disconnect2000nl',
+        'get2000nlSession',
+        'platformLookup',
         'platformAction',
     ]);
     if (!allowed.has(action)) return { ok: false, error: 'unsupported_action' };

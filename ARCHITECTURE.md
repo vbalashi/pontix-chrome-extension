@@ -9,9 +9,9 @@ Pontix has three extension runtimes:
   receive Supabase sessions, provider API keys, 2000NL access/refresh tokens, or
   mutation credentials.
 - **Service worker** is the trusted boundary for validated messages, ephemeral
-  selection transport, provider network calls that require secrets, future
-  2000NL Connect PKCE flow, token refresh/revoke, and allowlisted Platform API
-  calls.
+  selection transport, provider network calls that require secrets, 2000NL
+  Connect PKCE flow, token refresh/revoke, read-only lookup, and allowlisted
+  Platform API action calls.
 - **Side panel** owns presentation and explicit user intent. It asks the service
   worker to consume the latest selection or run a defined command. It does not
   construct arbitrary Platform API requests and must not access 2000NL tokens.
@@ -21,8 +21,7 @@ Pontix has three extension runtimes:
 Pontix Supabase auth remains the legacy Pontix cloud-sync identity. It is not a
 2000NL user session and must never be forwarded to 2000NL Platform APIs.
 
-Future 2000NL integration uses a separate Connected Client registration, for
-example:
+2000NL integration uses a separate Connected Client registration, for example:
 
 - `pontix_chrome_dev`
 - `pontix_chrome`
@@ -35,7 +34,7 @@ opaque access/refresh tokens in trusted local extension storage only.
 - `chrome.storage.session`: ephemeral selected text/sentence snapshots with TTL
   and consume semantics.
 - `chrome.storage.local`: trusted local-only secrets such as provider API keys,
-  future 2000NL refresh/access tokens, and local-only extension state.
+  2000NL refresh/access tokens, and local-only extension state.
 - `chrome.storage.sync`: non-secret preferences only.
 
 User passwords are never persisted. Existing `encrypted_user_password` records
@@ -69,11 +68,18 @@ the service-worker boundary during migration.
 
 ## Source Binding Contract
 
-`src/scripts/sourceBinding.js` owns the client-side privacy contract for future
+`src/scripts/sourceBinding.js` owns the client-side privacy contract for
 2000NL provenance. It can classify `web_page`, `text_document`, and supported
 `ebook` selections, normalize URL observations, build hash-based bounded
 selection locators, invalidate bindings across navigation/tab/frame changes, and
 freeze one explicit action envelope.
+
+`src/scripts/platformClient.js` owns the 2000NL Connect and Platform command
+boundary. It builds PKCE authorize URLs, exchanges and refreshes opaque Connect
+sessions, revokes sessions, performs read-only lookup, and submits explicit
+learning actions from a frozen source binding. Bearer tokens are attached only
+to allowlisted `https://2000.dilum.io/api/connect/*` and
+`https://2000.dilum.io/api/platform/v1/*` routes.
 
 Live content-script wiring is intentionally separate from this module while
 `src/scripts/content.js` has unrelated local selection-timing changes. When that

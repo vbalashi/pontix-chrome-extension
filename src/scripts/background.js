@@ -5,7 +5,13 @@ import {
     redactForLog,
     validateInternalMessage,
 } from './security.js';
-import { performPlatformAction } from './platformClient.js';
+import {
+    disconnect2000Nl,
+    get2000NlSessionState,
+    performPlatformAction,
+    performPlatformLookup,
+    start2000NlConnect,
+} from './platformClient.js';
 import { createSelectionSourceBinding } from './sourceBinding.js';
 
 const SELECTION_STORAGE_KEY = 'sidePanel_textSelected';
@@ -208,11 +214,73 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
 
+    if (validation.action === 'connect2000nl') {
+        start2000NlConnect({
+            identity: chrome.identity,
+            storage: chrome.storage?.local,
+            fetchImpl: fetch,
+            clientId: request.clientId,
+            baseUrl: request.baseUrl,
+            interactive: request.interactive,
+        })
+            .then((result) => sendResponse(result))
+            .catch((error) => {
+                safeError("Failed to connect 2000NL", error);
+                sendResponse({ success: false, error: 'connect_2000nl_failed' });
+            });
+        return true;
+    }
+
+    if (validation.action === 'disconnect2000nl') {
+        disconnect2000Nl({
+            storage: chrome.storage?.local,
+            fetchImpl: fetch,
+            clientId: request.clientId,
+            baseUrl: request.baseUrl,
+        })
+            .then((result) => sendResponse(result))
+            .catch((error) => {
+                safeError("Failed to disconnect 2000NL", error);
+                sendResponse({ success: false, error: 'disconnect_2000nl_failed' });
+            });
+        return true;
+    }
+
+    if (validation.action === 'get2000nlSession') {
+        get2000NlSessionState({ storage: chrome.storage?.local })
+            .then((result) => sendResponse(result))
+            .catch((error) => {
+                safeError("Failed to read 2000NL session", error);
+                sendResponse({ success: false, error: 'session_2000nl_failed' });
+            });
+        return true;
+    }
+
+    if (validation.action === 'platformLookup') {
+        performPlatformLookup({
+            storage: chrome.storage?.local,
+            fetchImpl: fetch,
+            baseUrl: request.baseUrl,
+            query: request.query,
+            languageCode: request.languageCode,
+            contextText: request.contextText,
+            intent: request.intent,
+        })
+            .then((result) => sendResponse(result))
+            .catch((error) => {
+                safeError("Failed to run platform lookup", error);
+                sendResponse({ success: false, error: 'platform_lookup_failed' });
+            });
+        return true;
+    }
+
     if (validation.action === 'platformAction') {
         performPlatformAction({
             request,
             storage: chrome.storage?.local,
             fetchImpl: fetch,
+            baseUrl: request.baseUrl,
+            clientId: request.clientId,
         })
             .then((result) => sendResponse(result))
             .catch((error) => {

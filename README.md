@@ -149,8 +149,10 @@ Books reader pages:
   and consumed by the side panel; it is not persisted in sync/local storage.
 - Provider API keys are local-only secrets and are not written to
   `chrome.storage.sync`.
-- Pontix Supabase auth is separate from the future 2000NL Connected Client
-  identity.
+- Pontix Supabase auth is separate from the 2000NL Connected Client identity.
+- 2000NL Connect and Platform commands are service-worker owned. Lookup is
+  read-only; explicit learning actions use frozen `source-context-v2`
+  provenance from the captured selection binding.
 
 ## 📦 Distribution
 
