@@ -218,7 +218,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         start2000NlConnect({
             identity: chrome.identity,
             storage: chrome.storage?.local,
-            fetchImpl: fetch,
+            fetchImpl: serviceWorkerFetch,
             clientId: request.clientId,
             baseUrl: request.baseUrl,
             interactive: request.interactive,
@@ -234,7 +234,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (validation.action === 'disconnect2000nl') {
         disconnect2000Nl({
             storage: chrome.storage?.local,
-            fetchImpl: fetch,
+            fetchImpl: serviceWorkerFetch,
             clientId: request.clientId,
             baseUrl: request.baseUrl,
         })
@@ -259,7 +259,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (validation.action === 'platformLookup') {
         performPlatformLookup({
             storage: chrome.storage?.local,
-            fetchImpl: fetch,
+            fetchImpl: serviceWorkerFetch,
             baseUrl: request.baseUrl,
             query: request.query,
             languageCode: request.languageCode,
@@ -278,7 +278,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         performPlatformAction({
             request,
             storage: chrome.storage?.local,
-            fetchImpl: fetch,
+            fetchImpl: serviceWorkerFetch,
             baseUrl: request.baseUrl,
             clientId: request.clientId,
         })
@@ -385,6 +385,10 @@ function restrictTrustedStorageAccess() {
 function cleanupLegacySecrets() {
     if (!chrome.storage?.local?.remove) return;
     chrome.storage.local.remove(PONTIX_SECRET_STORAGE_KEYS.filter((key) => key === 'encrypted_user_password'));
+}
+
+function serviceWorkerFetch(url, init) {
+    return fetch(url, init);
 }
 
 function senderSummary(sender) {
