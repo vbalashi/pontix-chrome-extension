@@ -5,6 +5,7 @@ import {
     redactForLog,
     validateInternalMessage,
 } from './security.js';
+import { performPlatformAction } from './platformClient.js';
 import { createSelectionSourceBinding } from './sourceBinding.js';
 
 const SELECTION_STORAGE_KEY = 'sidePanel_textSelected';
@@ -203,6 +204,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .catch((error) => {
                 safeError("Failed to consume selection snapshot", error);
                 sendResponse({ success: false, error: 'selection_consume_failed' });
+            });
+        return true;
+    }
+
+    if (validation.action === 'platformAction') {
+        performPlatformAction({
+            request,
+            storage: chrome.storage?.local,
+            fetchImpl: fetch,
+        })
+            .then((result) => sendResponse(result))
+            .catch((error) => {
+                safeError("Failed to submit platform action", error);
+                sendResponse({ success: false, error: 'platform_action_failed' });
             });
         return true;
     }

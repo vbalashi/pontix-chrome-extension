@@ -74,6 +74,7 @@ export function validateInternalMessage(message = {}, sender = {}, runtimeId = '
         'translate',
         'updateSettings',
         'consumeSelectionSnapshot',
+        'platformAction',
     ]);
     if (!allowed.has(action)) {
         return { ok: false, error: 'unsupported_action' };
