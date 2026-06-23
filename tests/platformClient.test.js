@@ -272,6 +272,109 @@ test('disconnect revokes refresh token and clears local session', async () => {
     });
 });
 
+test('connected client command flow covers connect lookup action refresh and disconnect', async () => {
+    const storage = memoryStorage();
+    const calls = [];
+    const identity = {
+        getRedirectURL: () => 'https://extension.chromiumapp.org/',
+        launchWebAuthFlow: async ({ url }) => {
+            calls.push({ url, init: { method: 'CHROME_IDENTITY' } });
+            const state = new URL(url).searchParams.get('state');
+            return `https://extension.chromiumapp.org/?code=code-1&state=${state}`;
+        },
+    };
+    let tokenCounter = 0;
+
+    const fetchImpl = async (url, init) => {
+        calls.push({ url, init });
+        if (url.endsWith('/api/connect/token')) {
+            tokenCounter += 1;
+            return {
+                ok: true,
+                json: async () => ({
+                    access_token: `access-${tokenCounter}`,
+                    refresh_token: `refresh-${tokenCounter}`,
+                    expires_at: tokenCounter === 1
+                        ? Math.floor(Date.now() / 1000) + 3600
+                        : 1781620000,
+                    scope: 'platform:read platform:write offline_access',
+                    user: { id: 'user-1', email: 'user@example.com' },
+                }),
+            };
+        }
+        if (url.endsWith('/api/platform/v1/lookup')) {
+            return { ok: true, json: async () => ({ query: 'woord', items: [{ entry: { id: 'entry-1' } }] }) };
+        }
+        if (url.endsWith('/api/platform/v1/actions')) {
+            return { ok: true, json: async () => ({ status: 'accepted', eventId: 'event-1' }) };
+        }
+        if (url.endsWith('/api/connect/revoke')) {
+            return { ok: true, json: async () => ({ revoked: true }) };
+        }
+        throw new Error(`unexpected url ${url}`);
+    };
+
+    await expect(start2000NlConnect({
+        identity,
+        storage,
+        clientId: 'pontix_chrome_dev',
+        state: 'state-1',
+        codeVerifier: 'verifier-1',
+        fetchImpl,
+    })).resolves.toMatchObject({
+        success: true,
+        session: { connected: true, clientId: 'pontix_chrome_dev' },
+    });
+
+    await expect(performPlatformLookup({
+        storage,
+        query: 'woord',
+        languageCode: 'nl',
+        fetchImpl,
+    })).resolves.toMatchObject({
+        success: true,
+        result: { query: 'woord' },
+    });
+
+    await expect(performPlatformAction({
+        storage,
+        request: {
+            sourceBinding: sourceBinding(),
+            clientEventId: '55555555-5555-4555-8555-555555555555',
+            platformAction: 'start-learning',
+            entryId: 'entry-1',
+            cardTypeId: 'word-to-definition',
+        },
+        fetchImpl,
+    })).resolves.toMatchObject({
+        success: true,
+        result: { status: 'accepted' },
+    });
+
+    storage.store.pontix2000nlConnectSession.expires_at = 1;
+    await expect(performPlatformLookup({
+        storage,
+        query: 'woord',
+        fetchImpl,
+    })).resolves.toMatchObject({ success: true });
+
+    await expect(disconnect2000Nl({ storage, fetchImpl })).resolves.toEqual({
+        success: true,
+        disconnected: true,
+    });
+
+    expect(calls.map((call) => call.url)).toEqual([
+        expect.stringContaining('/connect/authorize'),
+        'https://2000.dilum.io/api/connect/token',
+        'https://2000.dilum.io/api/platform/v1/lookup',
+        'https://2000.dilum.io/api/platform/v1/actions',
+        'https://2000.dilum.io/api/connect/token',
+        'https://2000.dilum.io/api/platform/v1/lookup',
+        'https://2000.dilum.io/api/connect/revoke',
+    ]);
+    expect(storage.store.pontix2000nlConnectSession).toBeUndefined();
+});
+
 test('platform action rejects unsupported actions and missing sessions', async () => {
     expect(createPlatformActionRequest({
         sourceBinding: sourceBinding(),
