@@ -393,3 +393,199 @@ test('platform action rejects unsupported actions and missing sessions', async (
         fetchImpl: async () => { throw new Error('should not fetch'); },
     })).resolves.toEqual({ success: false, error: 'missing_2000nl_session' });
 });
+
+function deferred() {
+    let resolve;
+    const promise = new Promise((done) => { resolve = done; });
+    return { promise, resolve };
+}
+function expiredSession() {
+    return { access_token: 'nlc_a_old', refresh_token: 'nlc_r_old', expires_at: 1, client_id: 'pontix_chrome' };
+}
+function tokenResponse(access = 'nlc_a_new', refresh = 'nlc_r_new') {
+    return { ok: true, json: async () => ({ access_token: access, refresh_token: refresh, expires_at: Math.floor(Date.now() / 1000) + 3600 }) };
+}
+async function untilCalled(mock) {
+    for (let i = 0; i < 40 && !mock.mock.calls.length; i += 1) await Promise.resolve();
+    expect(mock).toHaveBeenCalled();
+}
+
+test('concurrent expired lookups share one refresh and both use the rotated opaque token', async () => {
+    const storage = memoryStorage({ pontix2000nlConnectSession: expiredSession() });
+    const gate = deferred();
+    const refresh = jest.fn(() => gate.promise);
+    const bearers = [];
+    const fetchImpl = async (url, init) => {
+        if (url.endsWith('/api/connect/token')) return refresh();
+        bearers.push(init.headers.Authorization);
+        return { ok: true, json: async () => ({ items: [] }) };
+    };
+    const first = performPlatformLookup({ storage, fetchImpl, query: 'a' });
+    const second = performPlatformLookup({ storage, fetchImpl, query: 'b' });
+    await untilCalled(refresh);
+    gate.resolve(tokenResponse());
+    expect((await Promise.all([first, second])).every((result) => result.success)).toBe(true);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(bearers).toEqual(['Bearer nlc_a_new', 'Bearer nlc_a_new']);
+});
+
+test('late expired snapshot and recreated client read the persisted opaque rotation', async () => {
+    const old = expiredSession();
+    const storage = memoryStorage({ pontix2000nlConnectSession: old });
+    const fetchImpl = jest.fn(async () => tokenResponse());
+    await refresh2000NlSession({ storage, fetchImpl, session: old });
+    await refresh2000NlSession({ storage, fetchImpl, session: old });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    let restored;
+    jest.isolateModules(() => { restored = require('../src/scripts/platformClient.cjs'); });
+    const lookup = jest.fn(async (_url, init) => {
+        expect(init.headers.Authorization).toBe('Bearer nlc_a_new');
+        return { ok: true, json: async () => ({ items: [] }) };
+    });
+    expect((await restored.performPlatformLookup({ storage, fetchImpl: lookup })).success).toBe(true);
+    expect(lookup).toHaveBeenCalledTimes(1);
+});
+
+test.each(['success', 'failure'])('late refresh %s cannot resurrect logout or authorize a lookup', async (outcome) => {
+    const storage = memoryStorage({ pontix2000nlConnectSession: expiredSession() });
+    const gate = deferred();
+    const refresh = jest.fn(() => gate.promise);
+    const fetchImpl = jest.fn(async (url) => url.endsWith('/api/connect/token') ? refresh() : { ok: true, json: async () => ({ revoked: true }) });
+    const pending = performPlatformLookup({ storage, fetchImpl });
+    await untilCalled(refresh);
+    await disconnect2000Nl({ storage, fetchImpl });
+    gate.resolve(outcome === 'success' ? tokenResponse() : { ok: false, status: 401, json: async () => ({ error: 'invalid_refresh_token' }) });
+    expect((await pending).success).toBe(false);
+    expect(storage.store.pontix2000nlConnectSession).toBeUndefined();
+    expect(fetchImpl.mock.calls.some(([url]) => url.endsWith('/lookup'))).toBe(false);
+});
+
+function reconnect(storage, fetchImpl) {
+    return start2000NlConnect({ storage, fetchImpl, state: 'state', codeVerifier: 'verifier', identity: {
+        getRedirectURL: () => 'https://extension.chromiumapp.org/',
+        launchWebAuthFlow: async () => 'https://extension.chromiumapp.org/?state=state&code=new-code',
+    } });
+}
+test.each(['success', 'failure'])('late refresh %s cannot overwrite or invalidate a newer reconnect', async (outcome) => {
+    const storage = memoryStorage({ pontix2000nlConnectSession: expiredSession() });
+    const gate = deferred();
+    const refresh = jest.fn(() => gate.promise);
+    const fetchImpl = async (_url, init) => JSON.parse(init.body).grant_type === 'refresh_token' ? refresh() : tokenResponse('nlc_a_reconnect', 'nlc_r_reconnect');
+    const pending = refresh2000NlSession({ storage, fetchImpl });
+    await untilCalled(refresh);
+    expect((await reconnect(storage, fetchImpl)).success).toBe(true);
+    gate.resolve(outcome === 'success' ? tokenResponse() : { ok: false, status: 401, json: async () => ({ error: 'invalid_refresh_token' }) });
+    await pending;
+    expect(storage.store.pontix2000nlConnectSession.access_token).toBe('nlc_a_reconnect');
+});
+
+test('slow revoke cannot remove a reconnect and logout invalidates pending connect exchange', async () => {
+    const storage = memoryStorage({ pontix2000nlConnectSession: expiredSession() });
+    const revoke = deferred();
+    const started = jest.fn(() => revoke.promise);
+    const logout = disconnect2000Nl({ storage, fetchImpl: started });
+    await untilCalled(started);
+    expect((await reconnect(storage, async () => tokenResponse('nlc_a_reconnect'))).success).toBe(true);
+    revoke.resolve({ ok: true });
+    await logout;
+    expect(storage.store.pontix2000nlConnectSession.access_token).toBe('nlc_a_reconnect');
+    const code = deferred();
+    const exchange = jest.fn(() => code.promise);
+    const connecting = reconnect(storage, exchange);
+    await untilCalled(exchange);
+    await disconnect2000Nl({ storage, fetchImpl: async () => ({ ok: true }) });
+    code.resolve(tokenResponse());
+    expect((await connecting).success).toBe(false);
+    expect(storage.store.pontix2000nlConnectSession).toBeUndefined();
+});
+
+test('a delayed storage snapshot is re-read after another caller commits rotation', async () => {
+    const old = expiredSession();
+    const storage = memoryStorage({ pontix2000nlConnectSession: old });
+    const read = deferred();
+    const get = storage.get.bind(storage);
+    let first = true;
+    storage.get = async (key) => {
+        if (first) { first = false; await read.promise; return { [key]: old }; }
+        return get(key);
+    };
+    const fetchImpl = jest.fn(async () => tokenResponse());
+    const late = refresh2000NlSession({ storage, fetchImpl });
+    await refresh2000NlSession({ storage, fetchImpl });
+    read.resolve();
+    expect((await late).session.access_token).toBe('nlc_a_new');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
+
+test('new reconnect refresh is not joined to the previous generation flight', async () => {
+    const storage = memoryStorage({ pontix2000nlConnectSession: expiredSession() });
+    const gate = deferred();
+    const oldRequest = jest.fn(() => gate.promise);
+    const previous = refresh2000NlSession({ storage, fetchImpl: oldRequest });
+    await untilCalled(oldRequest);
+    await reconnect(storage, async () => tokenResponse('nlc_a_reconnect', 'nlc_r_reconnect'));
+    const nextRequest = jest.fn(async (_url, init) => {
+        expect(JSON.parse(init.body).refresh_token).toBe('nlc_r_reconnect');
+        return tokenResponse('nlc_a_latest', 'nlc_r_latest');
+    });
+    expect((await refresh2000NlSession({ storage, fetchImpl: nextRequest })).success).toBe(true);
+    gate.resolve(tokenResponse());
+    expect((await previous).success).toBe(false);
+    expect(storage.store.pontix2000nlConnectSession.access_token).toBe('nlc_a_latest');
+});
+
+test('changed production ESM lifecycle matches the tested CommonJS entry', () => {
+    const fs = require('fs');
+    const esm = fs.readFileSync(require.resolve('../src/scripts/platformClient.js'), 'utf8');
+    const commonjs = fs.readFileSync(require.resolve('../src/scripts/platformClient.cjs'), 'utf8');
+    const section = (text, from, to) => text.slice(text.indexOf(from), text.indexOf(to));
+    expect(section(esm, '// The service worker owns Connect.', 'const MUTATION_ACTIONS'))
+        .toBe(section(commonjs, '// The service worker owns Connect.', 'const MUTATION_ACTIONS'));
+    for (const [name, next] of [['start2000NlConnect', 'exchangeAuthorizationCode'], ['refresh2000NlSession', 'disconnect2000Nl'], ['disconnect2000Nl', 'get2000NlSessionState']]) {
+        const normalize = (text) => text.replace(/export async function/g, 'async function');
+        expect(section(normalize(esm), `async function ${name}`, `async function ${next}`))
+            .toBe(section(commonjs, `async function ${name}`, `async function ${next}`));
+    }
+    expect(section(esm, 'async function getValid2000NlSession', 'async function connectTokenRequest'))
+        .toBe(section(commonjs, 'async function getValid2000NlSession', 'async function connectTokenRequest'));
+});
+
+test('a stale transport rejection after reconnect is fenced without changing the newer session', async () => {
+    const storage = memoryStorage({ pontix2000nlConnectSession: expiredSession() });
+    let reject;
+    const transport = jest.fn(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const pending = refresh2000NlSession({ storage, fetchImpl: transport });
+    await untilCalled(transport);
+    await reconnect(storage, async () => tokenResponse('nlc_a_reconnect'));
+    reject(new TypeError('offline'));
+    await expect(pending).resolves.toEqual({ success: false, error: '2000nl_session_changed' });
+    expect(storage.store.pontix2000nlConnectSession.access_token).toBe('nlc_a_reconnect');
+});
+
+test('a delayed old connect commit cannot erase the newer pending Connect flow', async () => {
+    const storage = memoryStorage();
+    const write = deferred();
+    const commit = jest.fn();
+    const set = storage.set.bind(storage);
+    let first = true;
+    storage.set = async (value) => {
+        if (value.pontix2000nlConnectSession && first) {
+            first = false; commit(); await write.promise;
+        }
+        await set(value);
+    };
+    const previous = reconnect(storage, async () => tokenResponse('nlc_a_previous'));
+    await untilCalled(commit);
+    const webFlow = deferred();
+    const launch = jest.fn(() => webFlow.promise);
+    const next = start2000NlConnect({ storage, fetchImpl: async () => tokenResponse('nlc_a_latest'), state: 'new-state', codeVerifier: 'new-verifier', identity: {
+        getRedirectURL: () => 'https://extension.chromiumapp.org/', launchWebAuthFlow: launch,
+    } });
+    write.resolve();
+    expect((await previous).success).toBe(false);
+    await untilCalled(launch);
+    expect(storage.store.pontix2000nlPendingConnect.state).toBe('new-state');
+    webFlow.resolve('https://extension.chromiumapp.org/?state=new-state&code=latest');
+    expect((await next).success).toBe(true);
+    expect(storage.store.pontix2000nlConnectSession.access_token).toBe('nlc_a_latest');
+});

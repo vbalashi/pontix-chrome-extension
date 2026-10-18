@@ -13,6 +13,30 @@ const CONNECT_REVOKE_PATH = '/api/connect/revoke';
 const CONNECT_AUTHORIZE_PATH = '/connect/authorize';
 const DEFAULT_SCOPES = ['platform:read', 'platform:write', 'offline_access'];
 const ACCESS_TOKEN_REFRESH_SKEW_SECONDS = 60;
+// The service worker owns Connect. Share coordination across its callers, while
+// persistent local storage remains authoritative after worker recreation.
+const sessionCoordinators = new WeakMap();
+const sessionWithoutStorage = {};
+function coordinator(storage) {
+    const owner = storage || sessionWithoutStorage;
+    if (!sessionCoordinators.has(owner)) {
+        sessionCoordinators.set(owner, { generation: 0, refreshes: new Map(), writes: Promise.resolve() });
+    }
+    return sessionCoordinators.get(owner);
+}
+function sessionWrite(state, operation) {
+    const pending = state.writes.then(operation);
+    state.writes = pending.catch(() => {});
+    return pending;
+}
+function sessionChanged() { return { success: false, error: '2000nl_session_changed' }; }
+async function currentSession(params) {
+    return params.storage?.get ? load2000NlSession(params.storage) : params.session || null;
+}
+function sameSession(left, right) {
+    return left?.access_token === right?.access_token && left?.refresh_token === right?.refresh_token;
+}
+
 const MUTATION_ACTIONS = new Set([
     'start-learning',
     'mark-known',
@@ -26,6 +50,8 @@ async function start2000NlConnect(params = {}) {
         return { success: false, error: 'identity_api_unavailable' };
     }
     const storage = params.storage;
+    const stateOwner = coordinator(storage);
+    const generation = ++stateOwner.generation;
     const baseUrl = normalizeBaseUrl(params.baseUrl || DEFAULT_2000NL_BASE_URL);
     const clientId = params.clientId || DEFAULT_2000NL_CLIENT_ID;
     const redirectUri = params.redirectUri || identity.getRedirectURL();
@@ -41,8 +67,9 @@ async function start2000NlConnect(params = {}) {
         codeVerifier,
     });
 
-    if (storage?.set) {
-        await storage.set({
+    const pendingStored = await sessionWrite(stateOwner, async () => {
+        if (stateOwner.generation !== generation) return false;
+        if (storage?.set) await storage.set({
             [PONTIX_2000NL_PENDING_CONNECT_KEY]: {
                 baseUrl,
                 clientId,
@@ -53,12 +80,15 @@ async function start2000NlConnect(params = {}) {
                 createdAt: Date.now(),
             },
         });
-    }
+        return stateOwner.generation === generation;
+    });
+    if (!pendingStored) return sessionChanged();
 
     const redirectedTo = await identity.launchWebAuthFlow({
         url: authorizeUrl,
         interactive: params.interactive !== false,
     });
+    if (stateOwner.generation !== generation) return sessionChanged();
     const redirect = new URL(redirectedTo);
     const error = redirect.searchParams.get('error');
     if (error) return { success: false, error };
@@ -78,8 +108,14 @@ async function start2000NlConnect(params = {}) {
     });
     if (!sessionResult.success) return sessionResult;
 
-    await store2000NlSession(storage, sessionResult.session);
-    if (storage?.remove) await storage.remove(PONTIX_2000NL_PENDING_CONNECT_KEY);
+    const committed = await sessionWrite(stateOwner, async () => {
+        if (stateOwner.generation !== generation) return false;
+        await store2000NlSession(storage, sessionResult.session);
+        if (stateOwner.generation !== generation) return false;
+        if (storage?.remove) await storage.remove(PONTIX_2000NL_PENDING_CONNECT_KEY);
+        return stateOwner.generation === generation;
+    });
+    if (!committed) return sessionChanged();
     return { success: true, session: publicSessionState(sessionResult.session) };
 }
 
@@ -98,29 +134,72 @@ async function exchangeAuthorizationCode(params = {}) {
 }
 
 async function refresh2000NlSession(params = {}) {
-    const session = params.session || await load2000NlSession(params.storage);
+    const state = coordinator(params.storage);
+    const generation = state.generation;
+    let session = await currentSession(params);
+    if (state.generation !== generation) return sessionChanged();
     if (!session?.refresh_token) return { success: false, error: 'missing_refresh_token' };
-    const refreshed = await connectTokenRequest({
-        baseUrl: params.baseUrl,
-        fetchImpl: params.fetchImpl,
-        body: {
-            grant_type: 'refresh_token',
-            client_id: params.clientId || session.client_id || DEFAULT_2000NL_CLIENT_ID,
-            refresh_token: session.refresh_token,
-        },
-    });
-    if (!refreshed.success) return refreshed;
-    await store2000NlSession(params.storage, refreshed.session);
-    return { success: true, session: refreshed.session };
+    // A late caller may still hold the pre-rotation snapshot. Never submit it.
+    if (params.session && !sameSession(params.session, session) && !shouldRefresh(session)) {
+        return { success: true, session };
+    }
+    const clientId = params.clientId || session.client_id || DEFAULT_2000NL_CLIENT_ID;
+    const key = `${normalizeBaseUrl(params.baseUrl)}:${clientId}`;
+    const existing = state.refreshes.get(key);
+    if (existing && existing.generation === generation) {
+        const result = await existing.promise;
+        if (state.generation !== generation) return sessionChanged();
+        session = await currentSession(params);
+        if (state.generation !== generation) return sessionChanged();
+        return params.storage?.get && result.success && session ? { success: true, session } : result;
+    }
+    const flight = { generation };
+    flight.promise = (async () => {
+        // Re-read after entering the shared flight: a preceding rotation may
+        // have committed while this caller's first storage read was suspended.
+        const latest = await currentSession(params);
+        if (state.generation !== generation) return sessionChanged();
+        if (!latest?.refresh_token) return { success: false, error: 'missing_refresh_token' };
+        if (!sameSession(latest, session) && !shouldRefresh(latest)) return { success: true, session: latest };
+        session = latest;
+        let refreshed;
+        try {
+            refreshed = await connectTokenRequest({
+                baseUrl: params.baseUrl,
+                fetchImpl: params.fetchImpl,
+                body: { grant_type: 'refresh_token', client_id: clientId, refresh_token: session.refresh_token },
+            });
+        } catch (error) {
+            if (state.generation !== generation) return sessionChanged();
+            throw error;
+        }
+        return sessionWrite(state, async () => {
+            if (state.generation !== generation) return sessionChanged();
+            const stored = await currentSession(params);
+            if (state.generation !== generation) return sessionChanged();
+            if (!sameSession(stored, session)) return stored ? { success: true, session: stored } : sessionChanged();
+            if (!refreshed.success) return refreshed;
+            await store2000NlSession(params.storage, refreshed.session);
+            if (state.generation !== generation) return sessionChanged();
+            return { success: true, session: refreshed.session };
+        });
+    })();
+    state.refreshes.set(key, flight);
+    try { return await flight.promise; }
+    finally { if (state.refreshes.get(key) === flight) state.refreshes.delete(key); }
 }
 
 async function disconnect2000Nl(params = {}) {
     const storage = params.storage;
-    const session = params.session || await load2000NlSession(storage);
-    if (!session?.refresh_token) {
-        if (storage?.remove) await storage.remove(PONTIX_2000NL_SESSION_KEY);
-        return { success: true, disconnected: true };
-    }
+    const state = coordinator(storage);
+    const generation = ++state.generation;
+    const session = await currentSession(params);
+    // Clear locally before the network await. A slow revoke must neither
+    // resurrect an old refresh nor remove a subsequent successful reconnect.
+    await sessionWrite(state, async () => {
+        if (state.generation === generation && storage?.remove) await storage.remove(PONTIX_2000NL_SESSION_KEY);
+    });
+    if (!session?.refresh_token) return { success: true, disconnected: true };
     const baseUrl = normalizeBaseUrl(params.baseUrl || DEFAULT_2000NL_BASE_URL);
     const response = await params.fetchImpl(`${baseUrl}${CONNECT_REVOKE_PATH}`, {
         method: 'POST',
@@ -130,7 +209,6 @@ async function disconnect2000Nl(params = {}) {
             refresh_token: session.refresh_token,
         }),
     });
-    if (storage?.remove) await storage.remove(PONTIX_2000NL_SESSION_KEY);
     if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
         return { success: false, error: payload?.error || 'disconnect_failed', status: response.status };
@@ -253,11 +331,14 @@ async function buildConnectAuthorizeUrl(params = {}) {
 }
 
 async function getValid2000NlSession(params = {}) {
-    const session = params.session || await load2000NlSession(params.storage);
+    const state = coordinator(params.storage);
+    const generation = state.generation;
+    const session = await currentSession(params);
+    if (state.generation !== generation) return sessionChanged();
     if (!session?.access_token) return { success: false, error: 'missing_2000nl_session' };
     if (!shouldRefresh(session)) return { success: true, session };
     if (!session.refresh_token) return { success: false, error: 'missing_refresh_token' };
-    return refresh2000NlSession(params);
+    return refresh2000NlSession({ ...params, session });
 }
 
 async function connectTokenRequest(params = {}) {
