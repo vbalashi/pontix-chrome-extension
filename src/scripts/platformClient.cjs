@@ -194,11 +194,13 @@ async function disconnect2000Nl(params = {}) {
     const state = coordinator(storage);
     const generation = ++state.generation;
     const session = await currentSession(params);
+    if (state.generation !== generation) return sessionChanged();
     // Clear locally before the network await. A slow revoke must neither
     // resurrect an old refresh nor remove a subsequent successful reconnect.
     await sessionWrite(state, async () => {
         if (state.generation === generation && storage?.remove) await storage.remove(PONTIX_2000NL_SESSION_KEY);
     });
+    if (state.generation !== generation) return sessionChanged();
     if (!session?.refresh_token) return { success: true, disconnected: true };
     const baseUrl = normalizeBaseUrl(params.baseUrl || DEFAULT_2000NL_BASE_URL);
     const response = await params.fetchImpl(`${baseUrl}${CONNECT_REVOKE_PATH}`, {

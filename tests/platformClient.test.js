@@ -589,3 +589,21 @@ test('a delayed old connect commit cannot erase the newer pending Connect flow',
     expect((await next).success).toBe(true);
     expect(storage.store.pontix2000nlConnectSession.access_token).toBe('nlc_a_latest');
 });
+
+test('a delayed logout storage read cannot revoke the newly reconnected refresh token', async () => {
+    const storage = memoryStorage({ pontix2000nlConnectSession: expiredSession() });
+    const read = deferred();
+    const get = storage.get.bind(storage);
+    let first = true;
+    storage.get = async (key) => {
+        if (first) { first = false; await read.promise; }
+        return get(key);
+    };
+    const revoke = jest.fn(async () => ({ ok: true }));
+    const logout = disconnect2000Nl({ storage, fetchImpl: revoke });
+    expect((await reconnect(storage, async () => tokenResponse('nlc_a_reconnect', 'nlc_r_reconnect'))).success).toBe(true);
+    read.resolve();
+    expect((await logout).success).toBe(false);
+    expect(revoke).not.toHaveBeenCalled();
+    expect(storage.store.pontix2000nlConnectSession.refresh_token).toBe('nlc_r_reconnect');
+});
