@@ -81,6 +81,16 @@ learning actions from a frozen source binding. Bearer tokens are attached only
 to allowlisted `https://2000.dilum.io/api/connect/*` and
 `https://2000.dilum.io/api/platform/v1/*` routes.
 
+Connect refresh is single-flight per trusted local-storage owner and connected
+client in the service worker. Callers re-read local storage before refresh so a
+late expired snapshot cannot reuse a consumed refresh credential. Connect and
+disconnect advance the lifecycle generation; pending refresh/connect results
+cannot overwrite a later login or restore a logged-out session. Session writes
+are serialized, and disconnect clears local state before waiting for revocation.
+This coordination is in-memory within the worker, not a cross-context storage
+lock. A recreated worker restores opaque credentials from local storage; only
+the worker is permitted to initiate these network operations.
+
 Live content-script wiring is intentionally separate from this module while
 `src/scripts/content.js` has unrelated local selection-timing changes. When that
 file is ready, the content script should pass real `Range` offsets and bounded
